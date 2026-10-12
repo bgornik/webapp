@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Strings</title>
+  <title>Tea picker</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -54,42 +54,59 @@
     }
     li .text { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
     li form { flex: 1; min-width: 0; }
+    #wheel { text-align: center; }
     #wheel svg { display: block; width: min(100%, 24rem); margin: 2rem auto 0; }
-    #wheel-spin {
-      transform-box: fill-box;
-      transform-origin: center;
-      animation: spin 40s linear infinite;
-    }
+    #wheel-spin { transform-box: fill-box; transform-origin: center; }
     #wheel-spin path, #wheel-spin circle { stroke: #fff; stroke-width: 0.6; }
+    #wheel-spin path.winner, #wheel-spin circle.winner { stroke: #facc15; stroke-width: 3; stroke-linejoin: round; }
     #wheel-spin text { fill: #fff; font-weight: 600; white-space: pre; }
     #wheel .hub { fill: #fff; stroke: #1f2937; stroke-width: 1.5; }
     #wheel .pointer { fill: #1f2937; stroke: #fff; stroke-width: 1; stroke-linejoin: round; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    #spin-button { margin-top: 1.5rem; padding: 0.7rem 1.6rem; font-size: 1.15rem; font-weight: 600; }
+    #spin-button:disabled { opacity: 0.6; cursor: default; }
+    #result {
+      margin: 1.5rem 0 0;
+      padding: 1.25rem 1rem;
+      border: 3px solid #f59e0b;
+      border-radius: 12px;
+      background: #fef3c7;
+      color: #78350f;
+      font-size: clamp(1.5rem, 6vw, 2.25rem);
+      font-weight: 700;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+      animation: pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
+    }
+    @keyframes pop { from { transform: scale(0.6); opacity: 0; } }
+    .confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
     @media (prefers-reduced-motion: reduce) {
-      #wheel-spin { animation: none; }
+      #result { animation: none; }
     }
   </style>
 </head>
 <body>
   <main>
-    <h1>Strings</h1>
+    <h1>Tea picker</h1>
     <form id="add-form">
-      <input id="add-input" type="text" maxlength="20" placeholder="Add a string (max 20 characters)" aria-label="New string" autocomplete="off">
+      <input id="add-input" type="text" maxlength="20" placeholder="Add a tea (max 20 characters)" aria-label="New tea" autocomplete="off">
       <button type="submit" class="primary">Add</button>
     </form>
     <p id="error" role="alert" hidden></p>
     <ul id="list"></ul>
-    <p id="empty" hidden>No strings yet.</p>
+    <p id="empty" hidden>No teas yet.</p>
     <div id="wheel" hidden>
-      <svg viewBox="-100 -100 200 200" role="img" aria-label="Slowly spinning wheel with one section per string">
+      <svg viewBox="-100 -100 200 200" role="img" aria-label="Spinning wheel with one section per tea">
         <g id="wheel-spin"></g>
         <circle class="hub" r="7"/>
         <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
       </svg>
+      <button id="spin-button" type="button" class="primary">Spin the wheel!</button>
+      <p id="result" role="status" hidden>Tea of the day: <strong id="result-name"></strong></p>
     </div>
   </main>
   <script>
     // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
+    // It predates the rename to "Tea picker" and is kept so saved lists survive.
     const STORAGE_KEY = 'webapp.strings';
     const MAX_LENGTH = 20;
 
@@ -100,6 +117,9 @@
     const emptyEl = document.getElementById('empty');
     const wheelEl = document.getElementById('wheel');
     const spinEl = document.getElementById('wheel-spin');
+    const spinButton = document.getElementById('spin-button');
+    const resultEl = document.getElementById('result');
+    const resultNameEl = document.getElementById('result-name');
 
     // Wheel geometry, in the SVG's own units (the viewBox is 200 wide, centred on 0,0).
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -110,8 +130,23 @@
     // All dark enough for white label text.
     const WHEEL_COLORS = ['#be123c', '#1d4ed8', '#047857', '#b45309', '#6d28d9', '#0e7490', '#a21caf', '#4d7c0f'];
 
+    const IDLE_TURN_MS = 40000;
+    const SPIN_MS = 6000;
+    const SPIN_TURNS = 6;
+    const SPIN_EASING = 'cubic-bezier(0.2, 0.4, 0.1, 1)';
+    const HOLD_MS = 6000; // how long the wheel rests on the winner before idling again
+    const CONFETTI_MS = 3500;
+    const CONFETTI_COUNT = 180;
+    const CONFETTI_COLORS = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#facc15'];
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
     let items = load();
     let editingId = null;
+    let winnerId = null;
+    let spinning = false;
+    let wheelAngle = 0; // degrees clockwise, where the wheel rests when nothing is animating it
+    let wheelAnimation = null;
+    let idleTimer = null;
 
     function load() {
       try {
@@ -144,7 +179,7 @@
         return null;
       }
       if (text.length > MAX_LENGTH) {
-        showError(`Strings can be at most ${MAX_LENGTH} characters.`);
+        showError(`Teas can be at most ${MAX_LENGTH} characters.`);
         return null;
       }
       showError('');
@@ -174,7 +209,7 @@
         input.type = 'text';
         input.maxLength = MAX_LENGTH;
         input.value = item.text;
-        input.setAttribute('aria-label', 'Edit string');
+        input.setAttribute('aria-label', 'Edit tea');
         input.autocomplete = 'off';
         input.addEventListener('keydown', event => {
           if (event.key === 'Escape') stopEditing();
@@ -222,6 +257,7 @@
     }
 
     // Only the contents of the spinning group are replaced, so the rotation never restarts.
+    // Also keeps the spin button and the "Tea of the day" sign in step with the list.
     function renderWheel() {
       const count = items.length;
       wheelEl.hidden = count === 0;
@@ -230,12 +266,19 @@
 
       const slices = [];
       const labels = [];
+      let winnerSlice = null;
       items.forEach((item, index) => {
         const start = index * step - Math.PI / 2; // the first slice starts at 12 o'clock
         const fill = sliceColor(index, count);
-        slices.push(count === 1
+        const slice = count === 1
           ? svgEl('circle', { r: WHEEL_RADIUS, fill })
-          : svgEl('path', { fill, d: `M0 0L${point(start)}A${WHEEL_RADIUS} ${WHEEL_RADIUS} 0 0 1 ${point(start + step)}Z` }));
+          : svgEl('path', { fill, d: `M0 0L${point(start)}A${WHEEL_RADIUS} ${WHEEL_RADIUS} 0 0 1 ${point(start + step)}Z` });
+        if (item.id === winnerId) {
+          slice.classList.add('winner');
+          winnerSlice = slice;
+        } else {
+          slices.push(slice);
+        }
 
         const label = svgEl('text', {
           x: LABEL_OUTER,
@@ -247,6 +290,8 @@
         label.textContent = item.text;
         labels.push(label);
       });
+      // The winner is drawn last so its outline sits on top of its neighbours.
+      if (winnerSlice) slices.push(winnerSlice);
       spinEl.replaceChildren(...slices, ...labels);
 
       // Shrink each label until it fits along the radius and inside its slice's width
@@ -259,6 +304,138 @@
         if (count > 2) scale = Math.min(scale, widthFactor * LABEL_OUTER / (LABEL_SIZE + widthFactor * length));
         label.setAttribute('font-size', (LABEL_SIZE * scale).toFixed(2));
       }
+
+      const winner = items.find(item => item.id === winnerId);
+      spinButton.disabled = spinning;
+      resultEl.hidden = !winner;
+      resultNameEl.textContent = winner ? winner.text : '';
+    }
+
+    function setWheelAngle(angle) {
+      wheelAngle = angle % 360;
+      spinEl.style.transform = `rotate(${wheelAngle}deg)`;
+    }
+
+    function startIdle() {
+      if (spinning || wheelAnimation || reducedMotion.matches) return;
+      wheelAnimation = spinEl.animate(
+        { transform: [`rotate(${wheelAngle}deg)`, `rotate(${wheelAngle + 360}deg)`] },
+        { duration: IDLE_TURN_MS, iterations: Infinity },
+      );
+    }
+
+    // Freezes the idle rotation where it currently is.
+    function stopIdle() {
+      clearTimeout(idleTimer);
+      if (!wheelAnimation) return;
+      const progress = wheelAnimation.effect.getComputedTiming().progress || 0;
+      wheelAnimation.cancel();
+      wheelAnimation = null;
+      setWheelAngle(wheelAngle + 360 * progress);
+    }
+
+    function spinWheel() {
+      if (spinning || items.length === 0) return;
+      stopIdle();
+      spinning = true;
+      winnerId = null;
+      renderWheel();
+
+      // Pick a slice, then a spot inside it (away from its edges) to bring under the pointer.
+      const step = 360 / items.length;
+      const index = Math.floor(Math.random() * items.length);
+      const landing = (index + 0.15 + Math.random() * 0.7) * step;
+      const target = wheelAngle + SPIN_TURNS * 360 + ((360 - landing - wheelAngle) % 360 + 360) % 360;
+
+      if (reducedMotion.matches) {
+        land(target);
+        return;
+      }
+      wheelAnimation = spinEl.animate(
+        { transform: [`rotate(${wheelAngle}deg)`, `rotate(${target}deg)`] },
+        { duration: SPIN_MS, easing: SPIN_EASING, fill: 'forwards' },
+      );
+      wheelAnimation.onfinish = () => land(target);
+    }
+
+    function land(angle) {
+      setWheelAngle(angle);
+      if (wheelAnimation) wheelAnimation.cancel();
+      wheelAnimation = null;
+      spinning = false;
+
+      // Whatever sits under the pointer wins, so the result is right even if the list changed mid-spin.
+      const index = Math.floor(((360 - wheelAngle) % 360) / (360 / items.length));
+      const winner = items[Math.min(index, items.length - 1)];
+      winnerId = winner ? winner.id : null;
+      renderWheel();
+      if (winner) {
+        celebrate();
+        resultEl.scrollIntoView({ block: 'nearest', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+      }
+      idleTimer = setTimeout(startIdle, HOLD_MS);
+    }
+
+    // Bursts confetti out of the middle of the wheel on a throwaway full-window canvas.
+    function celebrate() {
+      document.querySelectorAll('.confetti').forEach(el => el.remove());
+      if (reducedMotion.matches) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.className = 'confetti';
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * ratio;
+      canvas.height = window.innerHeight * ratio;
+      document.body.append(canvas);
+      const ctx = canvas.getContext('2d');
+      ctx.scale(ratio, ratio);
+
+      const box = wheelEl.querySelector('svg').getBoundingClientRect();
+      const originX = box.left + box.width / 2;
+      const originY = Math.min(Math.max(box.top + box.height / 2, window.innerHeight * 0.2), window.innerHeight * 0.7);
+      const pieces = Array.from({ length: CONFETTI_COUNT }, () => {
+        const direction = Math.random() * 2 * Math.PI;
+        const speed = 3 + Math.random() * 11;
+        return {
+          x: originX,
+          y: originY,
+          vx: Math.cos(direction) * speed,
+          vy: Math.sin(direction) * speed - 6,
+          size: 6 + Math.random() * 7,
+          tilt: Math.random() * Math.PI,
+          twirl: (Math.random() - 0.5) * 0.5,
+          color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+        };
+      });
+
+      const started = performance.now();
+      let previous = started;
+      function frame(now) {
+        const elapsed = now - started;
+        if (elapsed >= CONFETTI_MS || !canvas.isConnected) {
+          canvas.remove();
+          return;
+        }
+        const ticks = Math.min((now - previous) / 16.7, 3);
+        previous = now;
+        ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        ctx.globalAlpha = Math.min(1, (CONFETTI_MS - elapsed) / 700);
+        for (const piece of pieces) {
+          piece.vy += 0.28 * ticks;
+          piece.vx *= 0.985 ** ticks;
+          piece.x += piece.vx * ticks;
+          piece.y += piece.vy * ticks;
+          piece.tilt += piece.twirl * ticks;
+          ctx.save();
+          ctx.translate(piece.x, piece.y);
+          ctx.rotate(piece.tilt);
+          ctx.fillStyle = piece.color;
+          ctx.fillRect(-piece.size / 2, -piece.size / 4, piece.size, piece.size / 2);
+          ctx.restore();
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
     }
 
     function render() {
@@ -310,7 +487,10 @@
       render();
     });
 
+    spinButton.addEventListener('click', spinWheel);
+
     render();
+    startIdle();
   </script>
 </body>
 </html>
