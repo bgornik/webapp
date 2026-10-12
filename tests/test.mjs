@@ -131,7 +131,7 @@ try {
   check('landing: teapot, wheel, spin button, then the empty-wheel hint', order.every((v, i) => i === 0 || v > order[i - 1]), order.join(','));
   check('no teas: the disabled spin button holds its colour still', await ev(`return $('#spin-button').disabled && getComputedStyle($('#spin-button')).animationPlayState === 'paused';`));
   check('no teas: the disabled spin button sends out no waves', await ev(`const b = $('#spin-button'); return b.getAnimations({ subtree: true }).every(a => a.animationName !== 'wave') && getComputedStyle(b, '::before').opacity === '0' && getComputedStyle(b, '::after').opacity === '0';`));
-  check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš z gumbom »Seznam čajev«.';`));
+  check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš v meniju ⋮ zgoraj levo.';`));
   const head = await ev(`const mid = r => r.left + r.width / 2; const m = $('main').getBoundingClientRect(), pot = $('.teapot').getBoundingClientRect(), wheel = $('#wheel svg').getBoundingClientRect();
     return { potOff: mid(pot) - mid(m), potTop: pot.top, gapToWheel: wheel.top - pot.bottom, potSize: pot.width, potHeight: pot.height, potHidden: $('.teapot').getAttribute('aria-hidden'), noCat: !document.querySelector('[class*=cat]'),
       headings: document.querySelectorAll('h1').length, titleCard: /izbirnik/i.test(document.body.innerText), headerKids: [...$('header').children].map(e => e.tagName.toLowerCase()).join(), tab: document.title };`);
@@ -145,13 +145,55 @@ try {
   await sleep(600);
   const steamB = await ev(`return [...document.querySelectorAll('.teapot .pot-steam')].map(w => getComputedStyle(w).transform + getComputedStyle(w).opacity).join();`);
   check('teapot: has body, spout, handle and lid; only the steam moves, slowly and endlessly', steamA.wisps === 2 && steamA.names === 'steam,steam' && steamA.states === 'running,running' && steamA.endless && steamA.seconds >= 2 && steamA.staggered && steamA.abovePot && steamA.others === 0 && steamA.parts && steamA.frame !== steamB, JSON.stringify(steamA) + ' -> ' + steamB);
-  const opener = await ev(`const mid = r => r.left + r.width / 2; const b = $('#edit-teas').getBoundingClientRect(); return { text: $('#edit-teas').textContent, belowHint: b.top >= $('#hint').getBoundingClientRect().bottom, off: mid(b) - mid($('main').getBoundingClientRect()) };`);
-  check('landing: "Seznam čajev" button sits centred below the wheel section', opener.text === 'Seznam čajev' && opener.belowHint && Math.abs(opener.off) < 1, JSON.stringify(opener));
-  check('landing: tea editor is closed, none of it is shown', await ev(`return !dialog.open && editorParts.every(s => !shown(s)) && [...$('main').children].map(e => e.tagName + '#' + e.id).join() === 'HEADER#,DIV#wheel,BUTTON#edit-teas';`));
+  // ---- kebab menu at the top left: the only way into the tea list ----
+  const menuState = `(() => { const b = $('#menu-button'), m = $('#menu'), item = $('#edit-teas'); return { expanded: b.getAttribute('aria-expanded'), menuShown: shown('#menu'), itemShown: shown('#edit-teas'), focus: document.activeElement.id, dialog: dialog.open }; })()`;
+  const kebab = await ev(`const b = $('#menu-button').getBoundingClientRect(), m = $('main').getBoundingClientRect(), pot = $('.teapot').getBoundingClientRect(), wheel = $('#wheel svg').getBoundingClientRect();
+    return { left: b.left, top: b.top, right: b.right, bottom: b.bottom, width: b.width, height: b.height, mainLeft: m.left, vw: innerWidth, dots: $('#menu-button').querySelectorAll('svg circle').length, name: $('#menu-button').getAttribute('aria-label'), popup: $('#menu-button').getAttribute('aria-haspopup'),
+      clearOfTeapot: b.right <= pot.left, aboveWheel: b.bottom <= wheel.top, items: [...$('#menu').querySelectorAll('[role=menuitem]')].map(e => e.textContent).join(), oldButton: document.querySelectorAll('#edit-teas').length, ...${menuState} };`);
+  check('kebab: three dots in the top left corner, big enough to tap, named for screen readers', kebab.dots === 3 && kebab.left >= 0 && kebab.left <= kebab.mainLeft && kebab.left < kebab.vw * 0.1 && kebab.top >= 0 && kebab.top < 40 && kebab.width >= 44 && kebab.height >= 44 && kebab.name === 'Meni' && kebab.popup === 'menu' && kebab.clearOfTeapot && kebab.aboveWheel, JSON.stringify(kebab));
+  check('kebab: menu starts closed and holds "Seznam čajev" and "Zgodovina izbranih čajev"; no separate button any more', kebab.expanded === 'false' && !kebab.menuShown && !kebab.itemShown && kebab.items === 'Seznam čajev,Zgodovina izbranih čajev' && kebab.oldButton === 1 && (await ev(`return $('#edit-teas').closest('#menu') !== null && [...document.querySelectorAll('main > button, #wheel ~ button')].length === 0;`)), JSON.stringify(kebab));
+  check('landing: tea editor is closed, none of it is shown', await ev(`return !dialog.open && editorParts.every(s => !shown(s)) && [...$('main').children].map(e => e.tagName + '#' + e.id).join() === 'DIV#menu-wrap,HEADER#,DIV#wheel';`));
 
+  await clickAt(...await ev(`return middle('#menu-button');`));
+  const menuOpen = await ev(`const m = $('#menu').getBoundingClientRect(), b = $('#menu-button').getBoundingClientRect(); return { ...${menuState}, below: m.top >= b.bottom, leftAligned: Math.abs(m.left - b.left) < 1, inside: m.left >= 0 && m.right <= innerWidth, onTop: ['#edit-teas', '#open-history'].every(q => { const r = $(q).getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === $(q); }) };`);
+  check('kebab: a click opens the menu just below it, with the item focused', menuOpen.expanded === 'true' && menuOpen.menuShown && menuOpen.itemShown && menuOpen.focus === 'edit-teas' && menuOpen.below && menuOpen.leftAligned && menuOpen.inside && menuOpen.onTop && !menuOpen.dialog, JSON.stringify(menuOpen));
+  await clickAt(...await ev(`return middle('#menu-button');`));
+  const menuToggled = await ev(`return ${menuState};`);
+  check('kebab: a second click closes it', menuToggled.expanded === 'false' && !menuToggled.menuShown, JSON.stringify(menuToggled));
+  await clickAt(...await ev(`return middle('#menu-button');`));
+  await clickAt(...await ev(`return middle('.teapot');`));
+  const menuOutside = await ev(`return ${menuState};`);
+  check('kebab: a click elsewhere on the page closes it', menuOutside.expanded === 'false' && !menuOutside.menuShown, JSON.stringify(menuOutside));
+  await clickAt(...await ev(`return middle('#menu-button');`));
+  await pressEscape();
+  const menuEscaped = await ev(`return ${menuState};`);
+  check('kebab: Escape closes it and puts focus back on the three dots', menuEscaped.expanded === 'false' && !menuEscaped.menuShown && menuEscaped.focus === 'menu-button', JSON.stringify(menuEscaped));
+
+  await clickAt(...await ev(`return middle('#menu-button');`));
+  for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
+  const arrowDown = await ev(`return document.activeElement.id;`);
+  for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
+  const arrowWrap = await ev(`return document.activeElement.id;`);
+  for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 });
+  const arrowUp = await ev(`return document.activeElement.id;`);
+  check('kebab: arrow keys move between the two items, wrapping round', [arrowDown, arrowWrap, arrowUp].join() === 'open-history,edit-teas,open-history', [arrowDown, arrowWrap, arrowUp].join());
+  await pressEscape();
+
+  // History, before anything has ever been picked.
+  await clickAt(...await ev(`return middle('#menu-button');`));
+  await clickAt(...await ev(`return middle('#open-history');`));
+  const historyBlank = await ev(`const h = $('#history-dialog'); return { open: h.open, modal: h.matches(':modal'), title: $('#history-title').textContent, labelled: h.getAttribute('aria-labelledby'), rows: h.querySelectorAll('li').length, empty: shown('#history-empty') && $('#history-empty').textContent, menuClosed: !shown('#menu'), saved: localStorage.getItem('webapp.history'), close: $('#close-history').textContent };`);
+  check('history: the menu item opens a modal dialog titled "Zgodovina izbranih čajev"', historyBlank.open && historyBlank.modal && historyBlank.title === 'Zgodovina izbranih čajev' && historyBlank.labelled === 'history-title' && historyBlank.menuClosed && historyBlank.close === 'Zapri', JSON.stringify(historyBlank));
+  check('history: with nothing picked yet it says so, and nothing is saved', historyBlank.rows === 0 && historyBlank.empty === 'Noben čaj še ni bil izbran.' && historyBlank.saved === null, JSON.stringify(historyBlank));
+  await pressEscape();
+  check('history: Escape closes it and returns focus to the three dots', await ev(`return !$('#history-dialog').open && document.activeElement.id === 'menu-button';`));
+
+  await clickAt(...await ev(`return middle('#menu-button');`));
   await clickAt(...await ev(`return middle('#edit-teas');`));
+  const menuChosen = await ev(`return ${menuState};`);
+  check('kebab: choosing "Seznam čajev" closes the menu and opens the tea list', menuChosen.dialog && menuChosen.expanded === 'false' && !menuChosen.menuShown, JSON.stringify(menuChosen));
   const opened = await ev(`return { open: dialog.open, modal: dialog.matches(':modal'), parts: editorParts.filter(s => s !== '#list').every(shown), title: $('#teas-title').textContent, button: $('#edit-teas').textContent, labelled: dialog.getAttribute('aria-labelledby'), focusInside: dialog.contains(document.activeElement), focus: document.activeElement.id, pageLocked: getComputedStyle(document.documentElement).overflow };`);
-  check('editor: clicking the button opens a modal dialog titled "Seznam čajev", like the button', opened.open && opened.modal && opened.parts && opened.title === 'Seznam čajev' && opened.title === opened.button && opened.labelled === 'teas-title', JSON.stringify(opened));
+  check('editor: it is a modal dialog titled "Seznam čajev", like the menu item', opened.open && opened.modal && opened.parts && opened.title === 'Seznam čajev' && opened.title === opened.button && opened.labelled === 'teas-title', JSON.stringify(opened));
   check('editor: focus moves into the dialog (not the text field, so a phone keyboard stays down)', opened.focusInside && opened.focus === 'close-teas', JSON.stringify(opened));
   check('editor: page behind the dialog cannot scroll', opened.pageLocked === 'hidden', opened.pageLocked);
   const place = await ev(`const d = dialog.getBoundingClientRect(), w = $('#wheel svg').getBoundingClientRect(); return { left: d.left, right: d.right, top: d.top, bottom: d.bottom, vw: innerWidth, vh: innerHeight, coversWheelTop: d.top < w.bottom };`);
@@ -201,7 +243,7 @@ try {
   await pressEscape();
   check('editor: Escape while editing a tea cancels the edit, dialog stays open', await ev(`return dialog.open && !$('#list li form') && texts().includes('hello world');`));
   await pressEscape();
-  check('editor: Escape again closes the dialog and returns focus to the button', await ev(`return !dialog.open && document.activeElement.id === 'edit-teas' && editorParts.every(s => !shown(s)) && getComputedStyle(document.documentElement).overflow !== 'hidden';`));
+  check('editor: Escape again closes the dialog and returns focus to the three dots', await ev(`return !dialog.open && document.activeElement.id === 'menu-button' && editorParts.every(s => !shown(s)) && getComputedStyle(document.documentElement).overflow !== 'hidden';`));
 
   await ev(`$('#edit-teas').click(); btn('hello world', 'Uredi').click(); add('   ');`);
   const reopened = await ev(`return { open: dialog.open, editing: !!$('#list li form'), error: err() };`);
@@ -463,23 +505,23 @@ try {
 
   // Spinning again must not move what sits below the sign. Positions are page positions, so scrolling does not matter.
   const layout = `(() => { const y = el => Math.round((el.getBoundingClientRect().top + scrollY) * 10) / 10; const r = $('#result'), cs = getComputedStyle(r);
-    return { listButton: y($('#edit-teas')), signTop: y(r), signHeight: Math.round(r.offsetHeight * 10) / 10, absent: r.hidden, visibility: cs.visibility, sign: sign(), popping: r.getAnimations().length, text: r.textContent }; })()`;
+    return { pageHeight: document.documentElement.scrollHeight, signTop: r.offsetTop, signHeight: Math.round(r.offsetHeight * 10) / 10, absent: r.hidden, visibility: cs.visibility, sign: sign(), popping: r.getAnimations().length, text: r.textContent }; })()`;
   const atRest = await sv(`return ${layout};`);
   await sv(`spinBtn.click();`);
   const whileSpinning = await sv(`return ${layout};`);
   check('while spinning: the old sign is blanked but keeps its place and size', !whileSpinning.absent && whileSpinning.visibility === 'hidden' && whileSpinning.sign === null && whileSpinning.signTop === atRest.signTop && whileSpinning.signHeight === atRest.signHeight && whileSpinning.text === atRest.text, JSON.stringify([atRest, whileSpinning]));
   check('while spinning: nothing on the wheel blinks', await sv(`return spin.querySelectorAll('.winner, .winner-label').length === 0 && [...spin.querySelectorAll('path, text')].every(e => e.getAnimations().length === 0);`));
   check('while spinning: the disabled button sends out no waves', await sv(`return spinBtn.disabled && spinBtn.getAnimations({ subtree: true }).every(a => a.animationName !== 'wave');`));
-  check('while spinning: "Seznam čajev" stays exactly where it was', whileSpinning.listButton === atRest.listButton, `${atRest.listButton} -> ${whileSpinning.listButton}`);
+  check('while spinning: the page keeps its height, so nothing jumps', whileSpinning.pageHeight === atRest.pageHeight, `${atRest.pageHeight} -> ${whileSpinning.pageHeight}`);
   await sleep(700);
   const midSpin = await sv(`return ${layout};`);
-  check('mid-spin: still in the same place', midSpin.listButton === atRest.listButton && midSpin.visibility === 'hidden', JSON.stringify(midSpin));
+  check('mid-spin: still the same', midSpin.pageHeight === atRest.pageHeight && midSpin.signTop === atRest.signTop && midSpin.visibility === 'hidden', JSON.stringify(midSpin));
   await sv(`spin.getAnimations()[0].finish();`);
   await settle();
   const afterLanding = await sv(`return ${layout};`);
   const landedTea = (await sv(`return state();`)).tea;
   check('after landing: the sign is back with the new tea and a pop-in', afterLanding.visibility === 'visible' && afterLanding.sign !== null && afterLanding.sign !== atRest.sign && afterLanding.popping === 1, JSON.stringify(afterLanding));
-  check('after landing: "Seznam čajev" has still not moved', afterLanding.listButton === atRest.listButton && afterLanding.signHeight === atRest.signHeight, `${atRest.listButton} -> ${afterLanding.listButton}`);
+  check('after landing: page height and sign size are unchanged', afterLanding.pageHeight === atRest.pageHeight && afterLanding.signHeight === atRest.signHeight, `${atRest.pageHeight} -> ${afterLanding.pageHeight}`);
 
   await load();
   const back = await sv(`return { sign: sign(), winners: spin.querySelectorAll('.winner').length, canvases: document.querySelectorAll('canvas').length, idle: spin.getAnimations()[0]?.effect.getTiming().duration, disabled: spinBtn.disabled };`);
@@ -554,6 +596,67 @@ try {
   const upgradedState = await sv(`return ${dayState};`);
   check('next spin after that saves the new format with today', upgradedState.saved && upgradedState.saved.day === upgradedState.today && upgradedState.date === upgradedState.todayText && upgraded.tea.toUpperCase() === upgradedState.sign.slice('Čaj dneva: '.length), JSON.stringify(upgradedState));
 
+  // ---- history of picks: last ten, newest first, saved on the device ----
+  const historyState = `(() => { const h = $('#history-dialog'); let saved = null; try { saved = JSON.parse(localStorage.getItem('webapp.history')); } catch {}
+    return { open: h.open, rows: [...h.querySelectorAll('#history-list li')].map(li => li.querySelector('.text').textContent + ' @ ' + li.querySelector('.when').textContent), saved, empty: shown('#history-empty') }; })()`;
+  const longDate = `(d => new Intl.DateTimeFormat('sl', { weekday: 'long', day: 'numeric', month: 'long' }).format(d))`;
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`['Zeleni', 'Črni', 'Meta'].forEach(add);`);
+  const spun = [];
+  for (let i = 0; i < 3; i++) spun.unshift((await fastSpin()).tea);
+  await sv(`$('#open-history').click();`);
+  const h3 = await sv(`return { ...${historyState}, today: ${longDate}(new Date()) };`);
+  check('history: each landed spin is listed with its day, newest first', h3.open && h3.rows.join('|') === spun.map(t => `${t} @ ${h3.today}`).join('|'), JSON.stringify(h3.rows));
+  check('history: saved on the device as text and day', Array.isArray(h3.saved) && h3.saved.map(p => p.text).join('|') === spun.join('|') && h3.saved.every(p => /^\d{4}-\d{2}-\d{2}$/.test(p.day) && Object.keys(p).sort().join() === 'day,text'), JSON.stringify(h3.saved));
+  const historyLook = await sv(`const li = $('#history-list li'), t = li.querySelector('.text'), w = li.querySelector('.when'), d = $('#history-dialog').getBoundingClientRect(); return { bold: getComputedStyle(t).fontWeight, dateBelow: w.getBoundingClientRect().top >= t.getBoundingClientRect().bottom - 2, inside: d.left >= 0 && d.right <= innerWidth && d.bottom <= innerHeight, noButtons: $('#history-list').querySelectorAll('button, input').length };`);
+  check('history: tea in bold with the day underneath; read-only; dialog fits the window', historyLook.bold === '700' && historyLook.dateBelow && historyLook.inside && historyLook.noButtons === 0, JSON.stringify(historyLook));
+  await clickAt(...await sv(`return middle('#close-history');`));
+  check('history: "Zapri" closes it', await sv(`return !$('#history-dialog').open;`));
+
+  // Renaming or deleting a tea later must not rewrite what was picked at the time.
+  await sv(`btn(${JSON.stringify(spun[0])}, 'Uredi').click(); const i = $('#list li form input'); i.value = 'Preimenovan'; i.closest('form').requestSubmit(); btn(${JSON.stringify(spun[1])}, 'Izbriši').click(); $('#open-history').click();`);
+  const hKept = await sv(`return ${historyState};`);
+  check('history: keeps the names as picked after a rename and a delete', hKept.rows.join('|') === h3.rows.join('|'), JSON.stringify(hKept.rows));
+  await sv(`$('#history-dialog').close();`);
+
+  // Older picks show their own day; the list stops at ten.
+  await sv(`const saved = JSON.parse(localStorage.getItem('webapp.history')); saved[saved.length - 1].day = '2026-03-05'; localStorage.setItem('webapp.history', JSON.stringify(saved));`);
+  await load();
+  await sv(`['Kamilica', 'Šipek', 'Lipa'].forEach(add); $('#open-history').click();`);
+  const hOld = await sv(`return ${historyState};`);
+  check('history: survives a reload, and an older pick shows the day it was made', hOld.rows.length === 3 && hOld.rows[2] === `${spun[2]} @ četrtek, 5. marec` && hOld.rows.slice(0, 2).join('|') === h3.rows.slice(0, 2).join('|'), JSON.stringify(hOld.rows));
+  await sv(`$('#history-dialog').close();`);
+  const more = [];
+  for (let i = 0; i < 9; i++) more.unshift((await fastSpin()).tea);
+  await sv(`$('#open-history').click();`);
+  const h10 = await sv(`return ${historyState};`);
+  check('history: keeps only the last 10 picks, dropping the oldest', h10.rows.length === 10 && h10.saved.length === 10 && h10.rows.slice(0, 9).map(r => r.split(' @ ')[0]).join('|') === more.join('|') && h10.rows[9].startsWith(spun[0] + ' @ ') && !h10.rows.some(r => r.includes('5. marec')), JSON.stringify(h10.rows));
+  const live = await fastSpin();
+  const hLive = await sv(`return ${historyState};`);
+  check('history: a spin that lands while the dialog is open shows up at once', hLive.open && hLive.rows.length === 10 && hLive.rows[0].startsWith(live.tea + ' @ ') && hLive.rows[1] === h10.rows[0], JSON.stringify(hLive.rows.slice(0, 3)));
+  const outsideH = await sv(`const d = $('#history-dialog').getBoundingClientRect(); return [d.left / 2, d.top / 2];`);
+  await clickAt(outsideH[0], outsideH[1]);
+  check('history: a click on the dimmed area outside closes it', await sv(`return !$('#history-dialog').open;`));
+
+  // Another tab adding a pick; unusable saved data; and a device that has a pick from before the history existed.
+  await sv(`const saved = JSON.parse(localStorage.getItem('webapp.history')); saved.unshift({ text: 'Iz drugega zavihka', day: '2026-03-06' }); localStorage.setItem('webapp.history', JSON.stringify(saved)); window.dispatchEvent(new StorageEvent('storage', { key: 'webapp.history' })); $('#open-history').click();`);
+  const hTab = await sv(`return ${historyState};`);
+  check('history: a pick made in another tab appears here', hTab.rows[0] === 'Iz drugega zavihka @ petek, 6. marec' && hTab.rows.length === 10, JSON.stringify(hTab.rows.slice(0, 2)));
+  for (const junk of ['{not json', '{"a":1}', '[{"text":"Brez dneva"},{"day":"2026-03-05"},{"text":"Slab dan","day":"2026-13-45"},null,7]']) {
+    await sv(`localStorage.setItem('webapp.history', ${JSON.stringify(junk)});`);
+    await load();
+    await sv(`$('#open-history').click();`);
+    const hJunk = await sv(`return ${historyState};`);
+    check(`history: unusable saved data (${junk.slice(0, 18)}…) is shown as empty, not as broken rows`, hJunk.open && hJunk.rows.length === 0 && hJunk.empty && !/invalid|undefined|NaN/i.test(await sv(`return $('#history-dialog').innerText;`)), JSON.stringify(hJunk));
+  }
+  await sv(`localStorage.removeItem('webapp.history');`);
+  await load();
+  await sv(`$('#open-history').click();`);
+  const hSeed = await sv(`return { ...${historyState}, sign: sign(), day: $('#result-date').textContent };`);
+  check('history: on a device with a pick but no history yet, it starts with that pick', hSeed.rows.length === 1 && hSeed.sign === 'Čaj dneva: ' + hSeed.rows[0].split(' @ ')[0].toUpperCase() && hSeed.rows[0].endsWith(' @ ' + hSeed.day), JSON.stringify(hSeed));
+  await sv(`$('#history-dialog').close();`);
+
   // Same tea written in different cases reads identically on the sign, so it counts as the same tea.
   await ev(`localStorage.clear();`);
   await load();
@@ -614,10 +717,15 @@ try {
     for (const type of ['touchStart', 'touchEnd']) await send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchStart' ? [{ x, y }] : [] });
     await sleep(300);
   };
-  check('phone: teapot, wheel, spin button and "Seznam čajev" all fit on the first screen', await sv(`return scrollY === 0 && $('#edit-teas').getBoundingClientRect().bottom <= innerHeight && $('.teapot').getBoundingClientRect().top >= 0 && spinBtn.getBoundingClientRect().bottom <= $('#edit-teas').getBoundingClientRect().top;`));
+  check('phone: kebab, teapot, wheel and spin button all fit on the first screen', await sv(`const k = $('#menu-button').getBoundingClientRect(); return scrollY === 0 && spinBtn.getBoundingClientRect().bottom <= innerHeight && $('.teapot').getBoundingClientRect().top >= 0 && k.top >= 0 && k.left >= 0 && k.left < 30 && k.width >= 44;`));
+  await tap(...await sv(`return middle('#menu-button');`));
+  const phoneMenu = await sv(`const m = $('#menu').getBoundingClientRect(), i = $('#edit-teas').getBoundingClientRect(); return { open: shown('#menu'), expanded: $('#menu-button').getAttribute('aria-expanded'), inside: m.left >= 0 && m.right <= innerWidth && m.top >= 0, itemHeight: i.height };`);
+  check('phone: tapping the three dots opens the menu, with a finger-sized item', phoneMenu.open && phoneMenu.expanded === 'true' && phoneMenu.inside && phoneMenu.itemHeight >= 40, JSON.stringify(phoneMenu));
+  const shotM = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(scratch, 'phone-menu.png'), Buffer.from(shotM.result.data, 'base64'));
   await tap(...await sv(`return middle('#edit-teas');`));
   const sheet = await sv(`const d = dialog.getBoundingClientRect(), i = $('#add-input').getBoundingClientRect(); return { open: dialog.open, left: d.left, right: d.right, top: d.top, bottom: d.bottom, vw: innerWidth, vh: innerHeight, inputBottom: i.bottom, rows: document.querySelectorAll('#list li').length, rowsShown: [...document.querySelectorAll('#list li')].every(li => li.getBoundingClientRect().bottom <= d.bottom) };`);
-  check('phone: tapping "Seznam čajev" opens the editor, inside the screen', sheet.open && sheet.left >= 0 && sheet.right <= sheet.vw && sheet.top >= 0 && sheet.bottom <= sheet.vh && sheet.rows === 5, JSON.stringify(sheet));
+  check('phone: tapping "Seznam čajev" in the menu opens the editor, inside the screen', sheet.open && sheet.left >= 0 && sheet.right <= sheet.vw && sheet.top >= 0 && sheet.bottom <= sheet.vh && sheet.rows === 5, JSON.stringify(sheet));
   check('phone: add field sits in the top half, clear of an on-screen keyboard', sheet.inputBottom < sheet.vh / 2, JSON.stringify(sheet));
   const shotE = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(scratch, 'phone-editor.png'), Buffer.from(shotE.result.data, 'base64'));
@@ -636,9 +744,16 @@ try {
   await sleep(1200);
   const signBox = await sv(`const r = $('#result').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, vh: innerHeight };`);
   const phoneSign = await sv(`const range = document.createRange(); range.setStartAfter($('#result-date')); range.setEndBefore($('#result-name')); const lh = parseFloat(getComputedStyle($('#result-date')).lineHeight);
-    return { dateRows: Math.round($('#result-date').getBoundingClientRect().height / lh), labelRows: range.getClientRects().length, dateFirst: $('#result-date').getBoundingClientRect().bottom <= range.getBoundingClientRect().top + 4, editBelow: $('#edit-teas').getBoundingClientRect().top >= $('#result').getBoundingClientRect().bottom };`);
-  check('phone: date line, then "Čaj dneva:", each on one line; list button below the sign', phoneSign.dateRows === 1 && phoneSign.labelRows === 1 && phoneSign.dateFirst && phoneSign.editBelow, JSON.stringify(phoneSign));
+    return { dateRows: Math.round($('#result-date').getBoundingClientRect().height / lh), labelRows: range.getClientRects().length, dateFirst: $('#result-date').getBoundingClientRect().bottom <= range.getBoundingClientRect().top + 4, signLast: $('#wheel').lastElementChild.id === 'result' && $('main').lastElementChild.id === 'wheel' };`);
+  check('phone: date line, then "Čaj dneva:", each on one line; nothing below the sign', phoneSign.dateRows === 1 && phoneSign.labelRows === 1 && phoneSign.dateFirst && phoneSign.signLast, JSON.stringify(phoneSign));
   const thick = await sv(`const w = el => ['Top', 'Right', 'Bottom', 'Left'].map(s => getComputedStyle(el)['border' + s + 'Width']).join(); return { rim: w($('#wheel svg')), sign: w($('#result')) };`);
+  await tap(...await sv(`window.scrollTo(0, 0); return middle('#menu-button');`));
+  await tap(...await sv(`return middle('#open-history');`));
+  const phoneHistory = await sv(`const d = $('#history-dialog').getBoundingClientRect(), t = $('#history-title').getBoundingClientRect(); return { open: $('#history-dialog').open, rows: $('#history-list').children.length, left: d.left, right: d.right, top: d.top, bottom: d.bottom, vw: innerWidth, vh: innerHeight, titleRows: Math.round(t.height / parseFloat(getComputedStyle($('#history-title')).lineHeight)) };`);
+  check('phone: "Zgodovina izbranih čajev" opens from the menu and fits the screen', phoneHistory.open && phoneHistory.rows === 1 && phoneHistory.left >= 0 && phoneHistory.right <= phoneHistory.vw && phoneHistory.top >= 0 && phoneHistory.bottom <= phoneHistory.vh && phoneHistory.titleRows <= 2, JSON.stringify(phoneHistory));
+  const shotH = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(scratch, 'phone-history.png'), Buffer.from(shotH.result.data, 'base64'));
+  await tap(...await sv(`return middle('#close-history');`));
   check('phone: wheel rim and sign border are equally thick', thick.rim === thick.sign && new Set(thick.rim.split(',')).size === 1, JSON.stringify(thick));
   check('phone: sign ends up fully on screen', signBox.top >= 0 && signBox.bottom <= signBox.vh + 0.5, JSON.stringify(signBox));
   const shotQ = await send('Page.captureScreenshot', { format: 'png' });

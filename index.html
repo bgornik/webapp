@@ -38,7 +38,44 @@
       padding: 2rem 1rem;
       font: 1rem/1.5 system-ui, sans-serif;
     }
-    main { max-width: 32rem; margin: 0 auto; }
+    main { position: relative; max-width: 32rem; margin: 0 auto; }
+    /* Kebab menu in the top left corner; its list drops down below the three dots. */
+    #menu-wrap { position: absolute; top: -0.75rem; left: -0.5rem; z-index: 5; }
+    #menu-button {
+      display: grid;
+      place-items: center;
+      width: 2.75rem;
+      height: 2.75rem;
+      padding: 0;
+      border-color: transparent;
+      border-radius: 50%;
+      background: none;
+      color: inherit;
+    }
+    #menu-button svg { width: 1.5rem; height: 1.5rem; fill: currentColor; }
+    #menu-button:hover, #menu-button[aria-expanded="true"] { background: rgb(128 128 128 / 0.2); }
+    #menu {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      min-width: 11rem;
+      margin-top: 0.25rem;
+      padding: 0.3rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: Canvas;
+      box-shadow: 0 6px 20px rgb(0 0 0 / 0.2);
+    }
+    #menu button {
+      display: block;
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      border: 0;
+      background: none;
+      color: inherit;
+      text-align: left;
+    }
+    #menu button:hover, #menu button:focus-visible { background: rgb(128 128 128 / 0.2); }
     header { display: flex; flex-direction: column; align-items: center; margin-bottom: 1.75rem; }
     /* A teapot heads the page, with steam drifting up from its spout. */
     .teapot { width: 4.5rem; height: 4.5rem; overflow: visible; }
@@ -76,9 +113,9 @@
     }
     button.danger { color: var(--danger); }
     #error { color: var(--danger); margin: 0.5rem 0 0; }
-    #empty { color: var(--muted); margin: 0; padding: 0.75rem 1.25rem 1.25rem; }
-    ul { list-style: none; margin: 0; padding: 0 1.25rem; }
-    ul:not(:empty) { padding-bottom: 0.75rem; }
+    #empty, #history-empty { color: var(--muted); margin: 0; padding: 0.75rem 1.25rem 1.25rem; }
+    ul, ol { list-style: none; margin: 0; padding: 0 1.25rem; }
+    ul:not(:empty), ol:not(:empty) { padding-bottom: 0.75rem; }
     li {
       display: flex;
       align-items: center;
@@ -87,6 +124,10 @@
       border-bottom: 1px solid var(--border);
     }
     li .text { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; white-space: pre-wrap; }
+    /* History rows: the tea, with the day it was chosen underneath. */
+    #history-list li { display: block; }
+    #history-list .when { display: block; color: var(--muted); font-size: 0.9rem; }
+    #history-dialog .sheet-title { margin-bottom: 0; }
     li form { flex: 1; min-width: 0; }
     #wheel { text-align: center; }
     /* The rim is the picture's own round border, so it is exactly as thick as the sign's border.
@@ -144,7 +185,6 @@
       30%, 100% { transform: scale(1.2, 1.85); opacity: 0; }
     }
     #hint { color: var(--muted); margin: 1rem 0 0; }
-    #edit-teas { display: block; margin: 1.5rem auto 0; }
     #result {
       margin: 1.5rem 0 0;
       padding: 1.25rem 1rem;
@@ -181,6 +221,15 @@
 </head>
 <body>
   <main>
+    <div id="menu-wrap">
+      <button id="menu-button" type="button" aria-label="Meni" aria-haspopup="menu" aria-controls="menu" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+      </button>
+      <div id="menu" role="menu" hidden>
+        <button id="edit-teas" type="button" role="menuitem" aria-haspopup="dialog">Seznam čajev</button>
+        <button id="open-history" type="button" role="menuitem" aria-haspopup="dialog">Zgodovina izbranih čajev</button>
+      </div>
+    </div>
     <header>
       <svg class="teapot" viewBox="0 0 64 64" aria-hidden="true">
         <path class="pot-steam" d="M55 26 q-3 -3.5 0 -7 q3 -3.5 0 -7"/>
@@ -201,10 +250,9 @@
         <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
       </svg>
       <button id="spin-button" type="button" class="primary">ZAVRTI KOLOČAJ</button>
-      <p id="hint" hidden>Kolo je prazno. Čaje dodaš z gumbom »Seznam čajev«.</p>
+      <p id="hint" hidden>Kolo je prazno. Čaje dodaš v meniju ⋮ zgoraj levo.</p>
       <p id="result" role="status" hidden><span id="result-date"></span> Čaj dneva: <strong id="result-name"></strong></p>
     </div>
-    <button id="edit-teas" type="button" aria-haspopup="dialog">Seznam čajev</button>
   </main>
   <dialog id="teas-dialog" aria-labelledby="teas-title">
     <div class="sheet-top">
@@ -221,11 +269,23 @@
     <ul id="list"></ul>
     <p id="empty" hidden>Čajev še ni.</p>
   </dialog>
+  <dialog id="history-dialog" aria-labelledby="history-title">
+    <div class="sheet-top">
+      <div class="sheet-title">
+        <h2 id="history-title">Zgodovina izbranih čajev</h2>
+        <button id="close-history" type="button">Zapri</button>
+      </div>
+    </div>
+    <ol id="history-list"></ol>
+    <p id="history-empty" hidden>Noben čaj še ni bil izbran.</p>
+  </dialog>
   <script>
     // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
     // It predates the rename to a tea picker and is kept so saved lists survive.
     const STORAGE_KEY = 'webapp.strings';
     const WINNER_KEY = 'webapp.winner'; // the current tea of the day and the day it was picked
+    const HISTORY_KEY = 'webapp.history'; // the last few picks, newest first, as [{ text, day }]
+    const HISTORY_LENGTH = 10;
     const SAVE_ERROR = 'Shranjevanje ni uspelo: shramba brskalnika ni na voljo ali je polna.';
     const MAX_LENGTH = 20;
 
@@ -235,6 +295,11 @@
     const listEl = document.getElementById('list');
     const emptyEl = document.getElementById('empty');
     const teasDialog = document.getElementById('teas-dialog');
+    const menuButton = document.getElementById('menu-button');
+    const menuEl = document.getElementById('menu');
+    const historyDialog = document.getElementById('history-dialog');
+    const historyListEl = document.getElementById('history-list');
+    const historyEmptyEl = document.getElementById('history-empty');
     const hintEl = document.getElementById('hint');
     const wheelEl = document.getElementById('wheel');
     const spinEl = document.getElementById('wheel-spin');
@@ -268,6 +333,7 @@
     let winnerId = null;
     let winnerDay = null; // the day it was picked, as YYYY-MM-DD; this is the date the sign shows
     loadWinner();
+    let picks = loadHistory();
     let avoidName = null; // while spinning: the current tea of the day, which must not win again
     let spinning = false;
     let wheelAngle = 0; // degrees clockwise, where the wheel rests when nothing is animating it
@@ -323,6 +389,46 @@
       } catch {
         showError(SAVE_ERROR);
       }
+    }
+
+    // The history keeps each tea's name as it was when picked, so later renames and deletions do not rewrite it.
+    function loadHistory() {
+      let raw = null;
+      try {
+        raw = localStorage.getItem(HISTORY_KEY);
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(pick => pick && typeof pick.text === 'string' && parseDay(pick.day)).slice(0, HISTORY_LENGTH);
+        }
+      } catch {
+        return [];
+      }
+      // Nothing saved yet: start the history off with the current pick, if its day is known.
+      const current = items.find(item => item.id === winnerId);
+      return raw === null && current && winnerDay ? [{ text: current.text, day: winnerDay }] : [];
+    }
+
+    function saveHistory() {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(picks));
+      } catch {
+        showError(SAVE_ERROR);
+      }
+    }
+
+    function renderHistory() {
+      historyListEl.replaceChildren(...picks.map(pick => {
+        const li = document.createElement('li');
+        const text = document.createElement('span');
+        text.className = 'text';
+        text.textContent = pick.text;
+        const when = document.createElement('span');
+        when.className = 'when';
+        when.textContent = DATE_FORMAT.format(parseDay(pick.day));
+        li.append(text, when);
+        return li;
+      }));
+      historyEmptyEl.hidden = picks.length > 0;
     }
 
     // Today on this device's calendar, as YYYY-MM-DD.
@@ -585,6 +691,11 @@
       winnerId = winner ? winner.id : null;
       winnerDay = winner ? today() : null;
       saveWinner();
+      if (winner) {
+        picks = [{ text: winner.text, day: winnerDay }, ...picks].slice(0, HISTORY_LENGTH);
+        saveHistory();
+        renderHistory();
+      }
       renderWheel();
       if (winner) {
         resultEl.animate(
@@ -709,29 +820,68 @@
 
     // Keep other open tabs of this page in step.
     window.addEventListener('storage', event => {
-      if (event.key !== STORAGE_KEY && event.key !== WINNER_KEY && event.key !== null) return;
+      if (![STORAGE_KEY, WINNER_KEY, HISTORY_KEY, null].includes(event.key)) return;
       items = load();
       if (!spinning) loadWinner();
+      picks = loadHistory();
+      renderHistory();
       if (!items.some(item => item.id === editingId)) editingId = null;
       render();
     });
 
     spinButton.addEventListener('click', spinWheel);
 
+    function setMenuOpen(open) {
+      menuEl.hidden = !open;
+      menuButton.setAttribute('aria-expanded', String(open));
+    }
+    menuButton.addEventListener('click', () => {
+      setMenuOpen(menuEl.hidden);
+      if (!menuEl.hidden) menuEl.querySelector('button').focus();
+    });
+    // Up and down arrows move between the menu's items.
+    menuEl.addEventListener('keydown', event => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      event.preventDefault();
+      const options = [...menuEl.querySelectorAll('button')];
+      const next = options.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : -1);
+      options[(next + options.length) % options.length].focus();
+    });
+    // A click anywhere else, or Escape, closes the menu.
+    document.addEventListener('click', event => {
+      if (!menuEl.hidden && !event.target.closest('#menu-wrap')) setMenuOpen(false);
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || menuEl.hidden) return;
+      setMenuOpen(false);
+      menuButton.focus();
+    });
+
     document.getElementById('edit-teas').addEventListener('click', () => {
+      setMenuOpen(false);
+      menuButton.focus(); // so focus comes back to the three dots when the dialog closes
       stopEditing(); // start clean: no half-finished edit or old error left from last time
       teasDialog.showModal();
     });
-    document.getElementById('close-teas').addEventListener('click', () => teasDialog.close());
-    // A click on the dimmed backdrop lands on the dialog element itself. The press must start there
-    // too, so dragging a text selection out of the add field does not close the dialog.
-    let pressedBackdrop = false;
-    teasDialog.addEventListener('pointerdown', event => {
-      pressedBackdrop = event.target === teasDialog;
+    document.getElementById('open-history').addEventListener('click', () => {
+      setMenuOpen(false);
+      menuButton.focus();
+      renderHistory();
+      historyDialog.showModal();
     });
-    teasDialog.addEventListener('click', event => {
-      if (pressedBackdrop && event.target === teasDialog) teasDialog.close();
-    });
+
+    for (const dialog of [teasDialog, historyDialog]) {
+      dialog.querySelector('.sheet-title button').addEventListener('click', () => dialog.close());
+      // A click on the dimmed backdrop lands on the dialog element itself. The press must start there
+      // too, so dragging a text selection out of the add field does not close the dialog.
+      let pressedBackdrop = false;
+      dialog.addEventListener('pointerdown', event => {
+        pressedBackdrop = event.target === dialog;
+      });
+      dialog.addEventListener('click', event => {
+        if (pressedBackdrop && event.target === dialog) dialog.close();
+      });
+    }
 
     render();
     startIdle();
