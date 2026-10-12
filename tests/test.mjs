@@ -135,7 +135,7 @@ try {
     return { potOff: mid(pot) - mid(m), potTop: pot.top, gapToWheel: wheel.top - pot.bottom, potSize: pot.width, potHeight: pot.height, potHidden: $('.teapot').getAttribute('aria-hidden'), noCat: !document.querySelector('[class*=cat]'),
       headings: document.querySelectorAll('h1').length, titleCard: /izbirnik/i.test(document.body.innerText), headerKids: [...$('header').children].map(e => e.tagName.toLowerCase()).join(), tab: document.title };`);
   check('title card is gone: no heading and no "IZBIRNIK ČAJA" text on the page (the tab title stays)', head.headings === 0 && !head.titleCard && head.headerKids === 'svg' && head.tab === 'Izbirnik čaja', JSON.stringify(head));
-  check('teapot: a little larger (72px), centred above the wheel, hidden from screen readers', head.noCat && Math.abs(head.potOff) < 1 && head.potSize === 72 && head.potHeight === 72 && head.potTop >= 0 && head.gapToWheel >= 8 && head.potHidden === 'true', JSON.stringify(head));
+  check('teapot: a little larger (72px), centred, with a clear gap above the wheel, hidden from screen readers', head.noCat && Math.abs(head.potOff) < 1 && head.potSize === 72 && head.potHeight === 72 && head.potTop >= 0 && head.gapToWheel >= 26 && head.gapToWheel <= 34 && head.potHidden === 'true', JSON.stringify(head));
   const steamA = await ev(`const wisps = [...document.querySelectorAll('.teapot .pot-steam')]; const pot = $('.teapot ellipse.pot-body').getBoundingClientRect();
     return { wisps: wisps.length, names: wisps.map(w => getComputedStyle(w).animationName).join(), states: wisps.map(w => w.getAnimations()[0]?.playState).join(), endless: wisps.every(w => getComputedStyle(w).animationIterationCount === 'infinite'),
       seconds: parseFloat(getComputedStyle(wisps[0]).animationDuration), staggered: getComputedStyle(wisps[0]).animationDelay !== getComputedStyle(wisps[1]).animationDelay,
@@ -357,6 +357,20 @@ try {
   await shoot('spin-landed');
   await sleep(3600);
   check('land: confetti cleans itself up', await sv(`return document.querySelectorAll('canvas').length === 0;`));
+  // The chosen slice blinks by swapping its own colour with its label's white, and back.
+  const blinkSetup = await sv(`const slice = spin.querySelector('path.winner'), label = spin.querySelector('text.winner-label'); const cs = getComputedStyle(slice), cl = getComputedStyle(label);
+    const probe = document.createElement('i'); probe.style.color = slice.getAttribute('fill'); document.body.append(probe); const own = getComputedStyle(probe).color; probe.remove();
+    return { own, labelText: label.textContent, names: [cs.animationName, cl.animationName].join(), endless: [cs.animationIterationCount, cl.animationIterationCount].join(), seconds: [cs.animationDuration, cl.animationDuration].join(),
+      others: [...spin.querySelectorAll('path:not(.winner), text:not(.winner-label)')].filter(e => e.getAnimations().length).length, labels: spin.querySelectorAll('.winner-label').length };`);
+  const blinkSeen = new Set();
+  for (let i = 0; i < 14; i++) {
+    blinkSeen.add(await sv(`return getComputedStyle(spin.querySelector('path.winner')).fill + ' / ' + getComputedStyle(spin.querySelector('text.winner-label')).fill;`));
+    await sleep(110);
+  }
+  const white = 'rgb(255, 255, 255)';
+  check('winner slice blinks: it and its label swap colours, in step with each other', blinkSetup.labelText === landed.tea && blinkSetup.labels === 1 && blinkSetup.names === 'blink-slice,blink-label' && blinkSetup.endless === 'infinite,infinite' && new Set(blinkSetup.seconds.split(',')).size === 1
+    && blinkSeen.size === 2 && blinkSeen.has(`${blinkSetup.own} / ${white}`) && blinkSeen.has(`${white} / ${blinkSetup.own}`), JSON.stringify(blinkSetup) + ' seen: ' + [...blinkSeen].join(' | '));
+  check('winner slice blinks: no other slice or label does', blinkSetup.others === 0, JSON.stringify(blinkSetup));
   await sleep(2400);
   const resumed = await sv(`const a = spin.getAnimations(); return { n: a.length, duration: a[0]?.effect.getTiming().duration, sign: sign(), winners: spin.querySelectorAll('.winner').length };`);
   check('after the pause: slow spin resumes, sign and highlight stay', resumed.n === 1 && resumed.duration === 40000 && resumed.sign === landed.sign && resumed.winners === 1, JSON.stringify(resumed));
@@ -399,6 +413,7 @@ try {
 
   await sv(`while (document.querySelectorAll('#list li').length > 1) $('#list li button.danger').click(); spinBtn.click(); spin.getAnimations()[0].finish();`);
   await sleep(25);
+  check('a single tea: the whole disc blinks', await sv(`const disc = spin.querySelector('circle.winner'), label = spin.querySelector('text.winner-label'); return !!disc && !!label && getComputedStyle(disc).animationName === 'blink-slice' && getComputedStyle(label).animationName === 'blink-label';`));
   check('a single tea can be spun and wins', await sv(`return sign() === 'Čaj dneva: ' + texts()[0].toUpperCase() && spin.querySelector('circle.winner') !== null;`), await sv(`return sign();`));
 
   // Uppercase sign, original case everywhere else (list is down to one tea here).
@@ -430,6 +445,7 @@ try {
   await sv(`spinBtn.click();`);
   const whileSpinning = await sv(`return ${layout};`);
   check('while spinning: the old sign is blanked but keeps its place and size', !whileSpinning.absent && whileSpinning.visibility === 'hidden' && whileSpinning.sign === null && whileSpinning.signTop === atRest.signTop && whileSpinning.signHeight === atRest.signHeight && whileSpinning.text === atRest.text, JSON.stringify([atRest, whileSpinning]));
+  check('while spinning: nothing on the wheel blinks', await sv(`return spin.querySelectorAll('.winner, .winner-label').length === 0 && [...spin.querySelectorAll('path, text')].every(e => e.getAnimations().length === 0);`));
   check('while spinning: "Seznam čajev" stays exactly where it was', whileSpinning.listButton === atRest.listButton, `${atRest.listButton} -> ${whileSpinning.listButton}`);
   await sleep(700);
   const midSpin = await sv(`return ${layout};`);
@@ -443,6 +459,7 @@ try {
 
   await load();
   const back = await sv(`return { sign: sign(), winners: spin.querySelectorAll('.winner').length, canvases: document.querySelectorAll('canvas').length, idle: spin.getAnimations()[0]?.effect.getTiming().duration, disabled: spinBtn.disabled };`);
+  check('reload: the saved pick blinks again', await sv(`const slice = spin.querySelector('.winner'), label = spin.querySelector('.winner-label'); return !!slice && !!label && slice.getAnimations().length === 1 && label.getAnimations().length === 1 && label.style.getPropertyValue('--slice') === slice.getAttribute('fill');`));
   check('reload: sign and highlight come back, wheel idles, no confetti replay', back.sign === afterLanding.sign && back.winners === 1 && back.canvases === 0 && back.idle === 40000 && !back.disabled, JSON.stringify(back));
 
   let prev = landedTea, repeats = '', wrong = '';

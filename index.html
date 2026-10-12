@@ -39,7 +39,7 @@
       font: 1rem/1.5 system-ui, sans-serif;
     }
     main { max-width: 32rem; margin: 0 auto; }
-    header { display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem; }
+    header { display: flex; flex-direction: column; align-items: center; margin-bottom: 1.75rem; }
     /* A teapot heads the page, with steam drifting up from its spout. */
     .teapot { width: 4.5rem; height: 4.5rem; overflow: visible; }
     .pot-body { fill: #f59e0b; }
@@ -103,6 +103,11 @@
     #wheel-spin path, #wheel-spin circle { stroke: #fff; stroke-width: 0.6; }
     #wheel-spin circle.empty { fill: var(--border); }
     #wheel-spin path.winner, #wheel-spin circle.winner { stroke: #facc15; stroke-width: 3; stroke-linejoin: round; }
+    /* The chosen slice blinks: its colour and its label's colour swap, then swap back. */
+    #wheel-spin .winner { animation: blink-slice 1.2s step-end infinite; }
+    #wheel-spin .winner-label { animation: blink-label 1.2s step-end infinite; }
+    @keyframes blink-slice { 50% { fill: #fff; } }
+    @keyframes blink-label { 50% { fill: var(--slice); } }
     #wheel-spin text { fill: #fff; font-weight: 600; white-space: pre; }
     #wheel .hub { fill: #fff; stroke: #1f2937; stroke-width: 1.5; }
     #wheel .pointer { fill: #1f2937; stroke: #fff; stroke-width: 1; stroke-linejoin: round; }
@@ -444,6 +449,10 @@
           transform: `rotate(${(start + step / 2) * 180 / Math.PI})`,
         });
         label.textContent = item.text;
+        if (item.id === winnerId) {
+          label.classList.add('winner-label');
+          label.style.setProperty('--slice', fill); // the colour its text takes when the slice blinks white
+        }
         labels.push(label);
       });
       // With no teas the wheel stays in place as a blank disc, so the page does not jump when the first is added.
