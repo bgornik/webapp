@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tea picker</title>
+  <title>Izbirnik čaja</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -86,27 +86,27 @@
 </head>
 <body>
   <main>
-    <h1>Tea picker</h1>
+    <h1>Izbirnik čaja</h1>
     <form id="add-form">
-      <input id="add-input" type="text" maxlength="20" placeholder="Add a tea (max 20 characters)" aria-label="New tea" autocomplete="off">
-      <button type="submit" class="primary">Add</button>
+      <input id="add-input" type="text" maxlength="20" placeholder="Dodaj čaj (največ 20 znakov)" aria-label="Nov čaj" autocomplete="off">
+      <button type="submit" class="primary">Dodaj</button>
     </form>
     <p id="error" role="alert" hidden></p>
     <ul id="list"></ul>
-    <p id="empty" hidden>No teas yet.</p>
+    <p id="empty" hidden>Čajev še ni.</p>
     <div id="wheel" hidden>
-      <svg viewBox="-100 -100 200 200" role="img" aria-label="Spinning wheel with one section per tea">
+      <svg viewBox="-100 -100 200 200" role="img" aria-label="Vrteče se kolo z enim poljem za vsak čaj">
         <g id="wheel-spin"></g>
         <circle class="hub" r="7"/>
         <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
       </svg>
-      <button id="spin-button" type="button" class="primary">Spin the wheel!</button>
-      <p id="result" role="status" hidden>Tea of the day: <strong id="result-name"></strong></p>
+      <button id="spin-button" type="button" class="primary">Zavrti kolo!</button>
+      <p id="result" role="status" hidden>Čaj dneva: <strong id="result-name"></strong></p>
     </div>
   </main>
   <script>
     // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
-    // It predates the rename to "Tea picker" and is kept so saved lists survive.
+    // It predates the rename to a tea picker and is kept so saved lists survive.
     const STORAGE_KEY = 'webapp.strings';
     const MAX_LENGTH = 20;
 
@@ -162,7 +162,7 @@
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
       } catch {
-        showError('Could not save: browser storage is unavailable or full.');
+        showError('Shranjevanje ni uspelo: shramba brskalnika ni na voljo ali je polna.');
       }
     }
 
@@ -175,11 +175,11 @@
     function validate(raw) {
       const text = raw.trim();
       if (!text) {
-        showError('Enter at least one character.');
+        showError('Vnesi vsaj en znak.');
         return null;
       }
       if (text.length > MAX_LENGTH) {
-        showError(`Teas can be at most ${MAX_LENGTH} characters.`);
+        showError(`Ime čaja ima lahko največ ${MAX_LENGTH} znakov.`);
         return null;
       }
       showError('');
@@ -209,7 +209,7 @@
         input.type = 'text';
         input.maxLength = MAX_LENGTH;
         input.value = item.text;
-        input.setAttribute('aria-label', 'Edit tea');
+        input.setAttribute('aria-label', 'Uredi čaj');
         input.autocomplete = 'off';
         input.addEventListener('keydown', event => {
           if (event.key === 'Escape') stopEditing();
@@ -218,9 +218,9 @@
         const saveButton = document.createElement('button');
         saveButton.type = 'submit';
         saveButton.className = 'primary';
-        saveButton.textContent = 'Save';
+        saveButton.textContent = 'Shrani';
 
-        form.append(input, saveButton, button('Cancel', '', stopEditing));
+        form.append(input, saveButton, button('Prekliči', '', stopEditing));
         form.addEventListener('submit', event => {
           event.preventDefault();
           const text = validate(input.value);
@@ -238,8 +238,8 @@
       text.textContent = item.text;
       li.append(
         text,
-        button('Edit', '', () => startEditing(item.id)),
-        button('Delete', 'danger', () => remove(item.id)),
+        button('Uredi', '', () => startEditing(item.id)),
+        button('Izbriši', 'danger', () => remove(item.id)),
       );
       return li;
     }
@@ -257,7 +257,7 @@
     }
 
     // Only the contents of the spinning group are replaced, so the rotation never restarts.
-    // Also keeps the spin button and the "Tea of the day" sign in step with the list.
+    // Also keeps the spin button and the "Čaj dneva" sign in step with the list.
     function renderWheel() {
       const count = items.length;
       wheelEl.hidden = count === 0;
