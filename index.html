@@ -306,7 +306,8 @@
       const winner = items.find(item => item.id === winnerId);
       spinButton.disabled = spinning || count === 0;
       resultEl.hidden = !winner;
-      resultNameEl.textContent = winner ? winner.text : '';
+      // The sign shouts the name; the stored tea and its wheel label keep their own case.
+      resultNameEl.textContent = winner ? winner.text.toLocaleUpperCase('sl') : '';
     }
 
     function setWheelAngle(angle) {
