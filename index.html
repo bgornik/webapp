@@ -116,6 +116,7 @@
       padding: 0.7rem 1.6rem;
       font-size: 1.15rem;
       font-weight: 600;
+      position: relative;
       animation: glow 4.5s ease-in-out infinite;
     }
     #spin-button:disabled { opacity: 0.6; cursor: default; animation-play-state: paused; }
@@ -123,6 +124,24 @@
       0%, 100% { background-color: var(--spin-a); border-color: var(--spin-a); }
       33% { background-color: var(--spin-b); border-color: var(--spin-b); }
       66% { background-color: var(--spin-c); border-color: var(--spin-c); }
+    }
+    /* Every few seconds two waves in the button's current colour spread out from behind it and fade. */
+    #spin-button::before, #spin-button::after {
+      content: '';
+      position: absolute;
+      inset: -1px; /* out to the edge of the button's border */
+      z-index: -1;
+      border-radius: inherit;
+      background-color: inherit;
+      opacity: 0;
+      pointer-events: none;
+      animation: wave 6s ease-out infinite;
+    }
+    #spin-button::after { animation-delay: 0.5s; }
+    #spin-button:disabled::before, #spin-button:disabled::after { animation: none; }
+    @keyframes wave {
+      0% { transform: scale(1); opacity: 0.5; }
+      30%, 100% { transform: scale(1.2, 1.85); opacity: 0; }
     }
     #hint { color: var(--muted); margin: 1rem 0 0; }
     #edit-teas { display: block; margin: 1.5rem auto 0; }

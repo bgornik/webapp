@@ -130,6 +130,7 @@ try {
   const order = await ev(`const top = s => $(s).getBoundingClientRect().top; return ['.teapot', '#wheel svg', '#spin-button', '#hint'].map(top);`);
   check('landing: teapot, wheel, spin button, then the empty-wheel hint', order.every((v, i) => i === 0 || v > order[i - 1]), order.join(','));
   check('no teas: the disabled spin button holds its colour still', await ev(`return $('#spin-button').disabled && getComputedStyle($('#spin-button')).animationPlayState === 'paused';`));
+  check('no teas: the disabled spin button sends out no waves', await ev(`const b = $('#spin-button'); return b.getAnimations({ subtree: true }).every(a => a.animationName !== 'wave') && getComputedStyle(b, '::before').opacity === '0' && getComputedStyle(b, '::after').opacity === '0';`));
   check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš z gumbom »Seznam čajev«.';`));
   const head = await ev(`const mid = r => r.left + r.width / 2; const m = $('main').getBoundingClientRect(), pot = $('.teapot').getBoundingClientRect(), wheel = $('#wheel svg').getBoundingClientRect();
     return { potOff: mid(pot) - mid(m), potTop: pot.top, gapToWheel: wheel.top - pot.bottom, potSize: pot.width, potHeight: pot.height, potHidden: $('.teapot').getAttribute('aria-hidden'), noCat: !document.querySelector('[class*=cat]'),
@@ -329,6 +330,23 @@ try {
   await sleep(1500);
   const glowB = await sv(`return getComputedStyle(spinBtn).backgroundColor;`);
   check('spin button: background shifts from colour to colour every few seconds, endlessly', glowA.name === 'glow' && glowA.endless === 'infinite' && glowA.seconds >= 3 && glowA.seconds <= 5 && glowA.state === 'running' && glowA.bg !== glowB, JSON.stringify(glowA) + ' -> ' + glowB);
+  // Waves: two faint copies of the button spread out from behind it now and then.
+  const waves = await sv(`const all = spinBtn.getAnimations({ subtree: true }).filter(a => a.animationName === 'wave'); const by = p => all.find(a => a.effect.pseudoElement === p);
+    const at = (p, ms) => { const a = by(p); a.pause(); a.currentTime = ms; const cs = getComputedStyle(spinBtn, p); const m = new DOMMatrix(cs.transform); const out = { opacity: +cs.opacity, sx: m.a, sy: m.d, bg: cs.backgroundColor }; a.play(); return out; };
+    const box = spinBtn.getBoundingClientRect(); const before = getComputedStyle(spinBtn, '::before'), after = getComputedStyle(spinBtn, '::after');
+    const result = { count: all.length, pseudos: all.map(a => a.effect.pseudoElement).sort().join(), seconds: parseFloat(before.animationDuration), endless: before.animationIterationCount, delays: [before.animationDelay, after.animationDelay].join(),
+      start: at('::before', 0), early: at('::before', 600), late: at('::before', 3500), buttonBg: getComputedStyle(spinBtn).backgroundColor, behind: before.zIndex, clicks: before.pointerEvents,
+      hit: document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === spinBtn, label: spinBtn.textContent, own: spinBtn.getAnimations().map(a => a.animationName).join() };
+    result.spreadPx = [(result.early.sx - 1) * box.width / 2, (result.early.sy - 1) * box.height / 2].map(Math.round);
+    return result;`);
+  // Screenshot with both waves frozen part-way out, to see them as drawn.
+  await sv(`for (const a of spinBtn.getAnimations({ subtree: true })) if (a.animationName === 'wave') { a.pause(); a.currentTime = a.effect.pseudoElement === '::before' ? 900 : 400; } spinBtn.scrollIntoView({ block: 'center' });`);
+  const shotW = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(scratch, 'waves.png'), Buffer.from(shotW.result.data, 'base64'));
+  await sv(`for (const a of spinBtn.getAnimations({ subtree: true })) if (a.animationName === 'wave') a.play(); window.scrollTo(0, 0);`);
+  check('spin button: sends out two staggered waves every few seconds, endlessly', waves.count === 2 && waves.pseudos === '::after,::before' && waves.seconds >= 4 && waves.seconds <= 8 && waves.endless === 'infinite' && new Set(waves.delays.split(',')).size === 2, JSON.stringify(waves));
+  check('spin button: a wave starts at the button\'s size and colour, spreads outwards and fades away', waves.start.opacity >= 0.3 && Math.abs(waves.start.sx - 1) < 0.01 && waves.early.sx > 1.05 && waves.early.sy > 1.2 && waves.early.opacity > 0 && waves.early.opacity < waves.start.opacity && waves.late.opacity === 0 && waves.spreadPx.every(px => px >= 6 && px <= 40), JSON.stringify(waves));
+  check('spin button: waves sit behind it, take its colour, and leave it clickable; the colour shift still runs', waves.behind === '-1' && waves.clicks === 'none' && waves.hit && waves.own === 'glow' && waves.label === 'ZAVRTI KOLOČAJ', JSON.stringify(waves));
   check('idle: still spinning slowly before any spin', await sv(`const a = spin.getAnimations(); return a.length === 1 && a[0].effect.getTiming().duration === 40000 && a[0].playState === 'running';`));
 
   // One spin in real time.
@@ -446,6 +464,7 @@ try {
   const whileSpinning = await sv(`return ${layout};`);
   check('while spinning: the old sign is blanked but keeps its place and size', !whileSpinning.absent && whileSpinning.visibility === 'hidden' && whileSpinning.sign === null && whileSpinning.signTop === atRest.signTop && whileSpinning.signHeight === atRest.signHeight && whileSpinning.text === atRest.text, JSON.stringify([atRest, whileSpinning]));
   check('while spinning: nothing on the wheel blinks', await sv(`return spin.querySelectorAll('.winner, .winner-label').length === 0 && [...spin.querySelectorAll('path, text')].every(e => e.getAnimations().length === 0);`));
+  check('while spinning: the disabled button sends out no waves', await sv(`return spinBtn.disabled && spinBtn.getAnimations({ subtree: true }).every(a => a.animationName !== 'wave');`));
   check('while spinning: "Seznam čajev" stays exactly where it was', whileSpinning.listButton === atRest.listButton, `${atRest.listButton} -> ${whileSpinning.listButton}`);
   await sleep(700);
   const midSpin = await sv(`return ${layout};`);
@@ -636,6 +655,10 @@ try {
     const glow = await ev(`const lum = ${luminance}; const b = $('#spin-button'), a = b.getAnimations()[0], d = a.effect.getTiming().duration; a.pause(); const seen = [];
       for (let i = 0; i < 18; i++) { a.currentTime = d * i / 18; const cs = getComputedStyle(b), x = lum(cs.backgroundColor), y = lum(cs.color); seen.push({ bg: cs.backgroundColor, border: cs.borderTopColor, contrast: (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }); }
       a.play(); return { colours: new Set(seen.map(o => o.bg)).size, worst: Math.min(...seen.map(o => o.contrast)), borderFollows: seen.every(o => o.bg === o.border), first: seen[0].bg, third: seen[6].bg, twoThirds: seen[12].bg };`);
+    const tint = await ev(`const b = $('#spin-button'), glow = b.getAnimations()[0], d = glow.effect.getTiming().duration; glow.pause(); const pairs = [];
+      for (const f of [0, 0.2, 0.33, 0.5, 0.66, 0.85]) { glow.currentTime = d * f; pairs.push([getComputedStyle(b).backgroundColor, getComputedStyle(b, '::before').backgroundColor, getComputedStyle(b, '::after').backgroundColor]); }
+      glow.play(); return { same: pairs.every(p => p[0] === p[1] && p[0] === p[2]), colours: new Set(pairs.map(p => p[0])).size };`);
+    check(`spin button (${scheme} theme): the waves follow its changing colour`, tint.same && tint.colours >= 5, JSON.stringify(tint));
     check(`spin button (${scheme} theme): label stays readable through the whole colour cycle`, glow.colours >= 12 && glow.worst >= 4.5 && glow.borderFollows && new Set([glow.first, glow.third, glow.twoThirds]).size === 3, JSON.stringify(glow));
     await ev(`$('#spin-button').click(); document.getElementById('wheel-spin').getAnimations()[0].finish();`);
     await sleep(600);
