@@ -54,10 +54,11 @@
     }
     li .text { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
     li form { flex: 1; min-width: 0; }
-    #wheel { text-align: center; }
-    #wheel svg { display: block; width: min(100%, 24rem); margin: 2rem auto 0; }
+    #wheel { text-align: center; margin-bottom: 2rem; }
+    #wheel svg { display: block; width: min(100%, 24rem); margin: 0 auto; }
     #wheel-spin { transform-box: fill-box; transform-origin: center; }
     #wheel-spin path, #wheel-spin circle { stroke: #fff; stroke-width: 0.6; }
+    #wheel-spin circle.empty { fill: var(--border); }
     #wheel-spin path.winner, #wheel-spin circle.winner { stroke: #facc15; stroke-width: 3; stroke-linejoin: round; }
     #wheel-spin text { fill: #fff; font-weight: 600; white-space: pre; }
     #wheel .hub { fill: #fff; stroke: #1f2937; stroke-width: 1.5; }
@@ -84,14 +85,7 @@
 <body>
   <main>
     <h1>Izbirnik čaja</h1>
-    <form id="add-form">
-      <input id="add-input" type="text" maxlength="20" placeholder="Dodaj čaj (največ 20 znakov)" aria-label="Nov čaj" autocomplete="off">
-      <button type="submit" class="primary">Dodaj</button>
-    </form>
-    <p id="error" role="alert" hidden></p>
-    <ul id="list"></ul>
-    <p id="empty" hidden>Čajev še ni.</p>
-    <div id="wheel" hidden>
+    <div id="wheel">
       <svg viewBox="-100 -100 200 200" role="img" aria-label="Vrteče se kolo z enim poljem za vsak čaj">
         <g id="wheel-spin"></g>
         <circle class="hub" r="7"/>
@@ -100,6 +94,13 @@
       <button id="spin-button" type="button" class="primary">Zavrti kolo!</button>
       <p id="result" role="status" hidden>Čaj dneva: <strong id="result-name"></strong></p>
     </div>
+    <form id="add-form">
+      <input id="add-input" type="text" maxlength="20" placeholder="Dodaj čaj (največ 20 znakov)" aria-label="Nov čaj" autocomplete="off">
+      <button type="submit" class="primary">Dodaj</button>
+    </form>
+    <p id="error" role="alert" hidden></p>
+    <ul id="list"></ul>
+    <p id="empty" hidden>Čajev še ni.</p>
   </main>
   <script>
     // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
@@ -256,7 +257,6 @@
     // Also keeps the spin button and the "Čaj dneva" sign in step with the list.
     function renderWheel() {
       const count = items.length;
-      wheelEl.hidden = count === 0;
       const step = 2 * Math.PI / count;
       const point = angle => `${(WHEEL_RADIUS * Math.cos(angle)).toFixed(3)} ${(WHEEL_RADIUS * Math.sin(angle)).toFixed(3)}`;
 
@@ -286,6 +286,8 @@
         label.textContent = item.text;
         labels.push(label);
       });
+      // With no teas the wheel stays in place as a blank disc, so the page does not jump when the first is added.
+      if (count === 0) slices.push(svgEl('circle', { r: WHEEL_RADIUS, class: 'empty' }));
       // The winner is drawn last so its outline sits on top of its neighbours.
       if (winnerSlice) slices.push(winnerSlice);
       spinEl.replaceChildren(...slices, ...labels);
@@ -302,7 +304,7 @@
       }
 
       const winner = items.find(item => item.id === winnerId);
-      spinButton.disabled = spinning;
+      spinButton.disabled = spinning || count === 0;
       resultEl.hidden = !winner;
       resultNameEl.textContent = winner ? winner.text : '';
     }
