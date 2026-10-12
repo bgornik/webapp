@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- The teapot from the page heading, with its steam drawn still. The PNG icons are rendered from this. -->
+  <rect width="512" height="512" rx="112" fill="#fef3c7"/>
+  <g transform="translate(44.8 28.8) scale(6.4)">
+    <path fill="none" stroke="#b45309" stroke-width="1.8" stroke-linecap="round" opacity="0.6" d="M55 26 q-3 -3.5 0 -7 q3 -3.5 0 -7 M60 27 q-3 -3.5 0 -7 q3 -3.5 0 -7"/>
+    <path fill="none" stroke="#d97706" stroke-width="4" stroke-linecap="round" d="M15 33 C3 31 3 51 16 50"/>
+    <path fill="#f59e0b" d="M43 39 C50 38 49 33 53 30 L58.5 34 C54 37 56 46 45 50 Z"/>
+    <ellipse fill="#f59e0b" cx="30" cy="42.5" rx="17" ry="15.5"/>
+    <ellipse fill="#d97706" cx="30" cy="57.5" rx="11" ry="2.5"/>
+    <path fill="#d97706" d="M18.5 30 Q30 19 41.5 30 Q30 33 18.5 30 Z"/>
+    <circle fill="#d97706" cx="30" cy="23" r="2.8"/>
+    <path fill="none" stroke="#fef3c7" stroke-width="2" stroke-linecap="round" d="M18 42 C19 36 23 33.5 27 33.5"/>
+  </g>
+</svg>

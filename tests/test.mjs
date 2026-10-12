@@ -15,14 +15,32 @@ const scratch = mkdtempSync(join(tmpdir(), 'tea-picker-test-')); // browser prof
 const profile = join(scratch, 'profile');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// The page is read fresh on every request, so reloads in the tests always see the current file.
+// The site's files are read fresh on every request, so reloads in the tests always see the current ones.
+const siteFiles = {
+  '/': ['index.html', 'text/html; charset=utf-8'],
+  '/index.html': ['index.html', 'text/html; charset=utf-8'],
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
+  '/sw.js': ['sw.js', 'text/javascript'],
+  '/icon.svg': ['icon.svg', 'image/svg+xml'],
+  '/icon-192.png': ['icon-192.png', 'image/png'],
+  '/icon-512.png': ['icon-512.png', 'image/png'],
+  '/icon-maskable-512.png': ['icon-maskable-512.png', 'image/png'],
+};
+let offline = false; // while set, every connection is dropped, as if the network had gone
+let pageRequests = 0;
 const server = createServer((req, res) => {
-  if (!['/', '/index.html'].includes(new URL(req.url, 'http://localhost').pathname)) {
+  if (offline) {
+    req.socket.destroy();
+    return;
+  }
+  const file = siteFiles[new URL(req.url, 'http://localhost').pathname];
+  if (!file) {
     res.writeHead(404).end();
     return;
   }
-  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-  res.end(readFileSync(join(siteDir, 'index.html')));
+  if (file[0] === 'index.html') pageRequests++;
+  res.writeHead(200, { 'content-type': file[1], 'cache-control': 'no-store' });
+  res.end(readFileSync(join(siteDir, file[0])));
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const HTTP_PORT = server.address().port;
@@ -70,13 +88,13 @@ try {
   const send = (method, params = {}) => new Promise(r => { const id = ++seq; pending.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   const errors = [];
   listeners.push(m => { if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.text); });
-  const load = async () => {
+  const load = async (path = '/index.html') => {
     const done = new Promise(r => listeners.push(m => m.method === 'Page.loadEventFired' && r()));
-    await send('Page.navigate', { url: `http://127.0.0.1:${HTTP_PORT}/index.html` });
+    await send('Page.navigate', { url: `http://127.0.0.1:${HTTP_PORT}${path}` });
     await done;
   };
   const run = async expr => {
-    const res = await send('Runtime.evaluate', { expression: `(() => { ${expr} })()`, returnByValue: true });
+    const res = await send('Runtime.evaluate', { expression: `(() => { ${expr} })()`, returnByValue: true, awaitPromise: true });
     if (res.result.exceptionDetails) throw new Error(res.result.exceptionDetails.exception?.description || res.result.exceptionDetails.text);
     return res.result.result.value;
   };
@@ -550,6 +568,46 @@ try {
     return (seen + ' | ' + err()).match(/\\b(add|edit|delete|save|cancel|tea|teas|spin|wheel|string|strings|characters?|day|new|yet|enter|close|empty|button)\\b/gi);`);
   check('no English UI text remains', english === null, String(english));
   check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['IZBIRNIK ČAJA', 'Seznam čajev', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
+
+  // ---- installable as an app, and usable without a connection ----
+  await ev(`localStorage.clear();`);
+  await load();
+  const manifest = (await send('Page.getAppManifest')).result;
+  const app = JSON.parse(manifest.data || '{}');
+  check('app: manifest is linked and parses without errors', manifest.url.endsWith('/manifest.webmanifest') && manifest.errors.length === 0, JSON.stringify(manifest.errors));
+  check('app: named like the page, opens in its own window at the page\'s own folder', app.name === await ev(`return document.title;`) && app.short_name.length <= 12 && app.display === 'standalone' && app.start_url === './' && app.scope === './' && app.lang === 'sl', JSON.stringify(app));
+  const icons = await ev(`const base = $('link[rel=manifest]').href;
+    return Promise.all(${JSON.stringify(app.icons || [])}.map(icon => new Promise(done => {
+      const img = new Image();
+      img.onload = () => done({ ...icon, real: img.naturalWidth + 'x' + img.naturalHeight });
+      img.onerror = () => done({ ...icon, real: 'missing' });
+      img.src = new URL(icon.src, base);
+    })));`);
+  check('app: icons load at their stated sizes; 192px, 512px and a maskable one are there', icons.every(i => i.real === i.sizes && i.type === 'image/png') && ['192x192', '512x512'].every(size => icons.some(i => i.sizes === size && !i.purpose)) && icons.some(i => i.purpose === 'maskable' && i.sizes === '512x512'), JSON.stringify(icons));
+  const blockers = (await send('Page.getInstallabilityErrors')).result.installabilityErrors;
+  check('app: Chrome finds nothing that stops it being installed', blockers.length === 0, JSON.stringify(blockers));
+  check('app: theme colour matches the manifest, tab icon loads', await ev(`return $('meta[name=theme-color]').content === ${JSON.stringify(app.theme_color)} && fetch($('link[rel=icon]').href).then(r => r.ok && r.headers.get('content-type') === 'image/svg+xml');`));
+
+  await ev(`return navigator.serviceWorker.ready.then(() => {});`);
+  await load();
+  check('offline: the service worker is in charge of the page', await ev(`const c = navigator.serviceWorker.controller; return !!c && c.scriptURL.endsWith('/sw.js') && c.state === 'activated';`));
+  await ev(`['Zeleni', 'Črni', 'Meta'].forEach(add);`);
+  const requestsBefore = pageRequests;
+  await load();
+  check('online: the page still comes from the network, so a new version shows up at once', pageRequests === requestsBefore + 1, `${pageRequests - requestsBefore} requests`);
+  offline = true;
+  for (const path of ['/index.html', '/']) {
+    await load(path);
+    // A file that was never saved shows whether the server can still be reached.
+    const off = await ev(`return fetch('not-saved').then(() => true, () => false).then(online => ({ online, title: document.title, teas: texts().join(), slices: document.querySelectorAll('#wheel-spin path').length, idle: $('#wheel-spin').getAnimations().length, button: !$('#spin-button').disabled }));`);
+    check(`offline: ${path} opens with the saved teas and a turning wheel`, !off.online && off.title === app.name && off.teas === 'Meta,Črni,Zeleni' && off.slices === 3 && off.idle === 1 && off.button, JSON.stringify(off));
+  }
+  await ev(`$('#spin-button').click(); $('#wheel-spin').getAnimations()[0].finish();`);
+  await sleep(25);
+  check('offline: the wheel can be spun and the pick is saved', await ev(`return !$('#result').hidden && $('#result-name').textContent !== '' && localStorage.getItem('webapp.winner') !== null;`));
+  offline = false;
+  await load();
+  check('back online: page loads from the network again, pick still there', pageRequests === requestsBefore + 2 && await ev(`return !$('#result').hidden;`), `${pageRequests - requestsBefore} requests`);
 
   check('no uncaught page errors', errors.length === 0, errors.join('; '));
   // Ask Chrome to quit by itself: killing only the main process leaves helpers that keep writing to the profile.
