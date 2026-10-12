@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Izbirnik čaja</title>
+  <title>Izbirnik čajev</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -11,7 +11,7 @@
       --muted: #6b7280;
       --accent: #2563eb;
       --danger: #b91c1c;
-      --rim: #d97706;
+      --trim: #d97706; /* wheel rim and the border of the "Čaj dneva" sign */
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -30,25 +30,26 @@
     main { max-width: 32rem; margin: 0 auto; }
     header { display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem; }
     h1 { margin: 0; font-weight: 800; text-align: center; }
-    /* A cat sits on the title, its tail swaying behind it. */
-    .cat { width: 3.5rem; height: 3.5rem; overflow: visible; }
-    .cat-fur { fill: #f59e0b; }
-    .cat-cream { fill: #fef3c7; }
-    .cat-pink { fill: #f9a8d4; }
-    .cat-ink { fill: #1f2937; }
-    .cat-shine { fill: #fff; }
-    .cat-mouth { fill: none; stroke: #1f2937; stroke-width: 1; stroke-linecap: round; }
-    .cat-whiskers { fill: none; stroke: #78350f; stroke-width: 0.6; stroke-linecap: round; }
-    .cat-tail {
+    /* A teapot sits on the title, with steam drifting up from its spout. */
+    .teapot { width: 3.5rem; height: 3.5rem; overflow: visible; }
+    .pot-body { fill: #f59e0b; }
+    .pot-dark { fill: #d97706; }
+    .pot-handle { fill: none; stroke: #d97706; stroke-width: 4; stroke-linecap: round; }
+    .pot-shine { fill: none; stroke: #fef3c7; stroke-width: 2; stroke-linecap: round; }
+    .pot-steam {
       fill: none;
-      stroke: #f59e0b;
-      stroke-width: 5.5;
+      stroke: var(--muted);
+      stroke-width: 1.6;
       stroke-linecap: round;
-      transform-box: fill-box;
-      transform-origin: 0% 100%; /* the end attached to the body */
-      animation: wag 1.6s ease-in-out infinite alternate;
+      opacity: 0;
+      animation: steam 2.8s ease-out infinite;
     }
-    @keyframes wag { from { transform: rotate(-9deg); } to { transform: rotate(11deg); } }
+    .pot-steam + .pot-steam { animation-delay: 1.4s; }
+    @keyframes steam {
+      0% { transform: translateY(3px); opacity: 0; }
+      30% { opacity: 0.9; }
+      100% { transform: translateY(-5px); opacity: 0; }
+    }
     h2 { margin: 0; font-size: 1.25rem; }
     form { display: flex; gap: 0.5rem; }
     input, button {
@@ -84,7 +85,7 @@
     #wheel-spin circle.empty { fill: var(--border); }
     #wheel-spin path.winner, #wheel-spin circle.winner { stroke: #facc15; stroke-width: 3; stroke-linejoin: round; }
     #wheel-spin text { fill: #fff; font-weight: 600; white-space: pre; }
-    #wheel .rim { fill: none; stroke: var(--rim); stroke-width: 4; }
+    #wheel .rim { fill: none; stroke: var(--trim); stroke-width: 4; }
     #wheel .hub { fill: #fff; stroke: #1f2937; stroke-width: 1.5; }
     #wheel .pointer { fill: #1f2937; stroke: #fff; stroke-width: 1; stroke-linejoin: round; }
     #spin-button { margin-top: 1.5rem; padding: 0.7rem 1.6rem; font-size: 1.15rem; font-weight: 600; }
@@ -94,7 +95,7 @@
     #result {
       margin: 1.5rem 0 0;
       padding: 1.25rem 1rem;
-      border: 3px solid #f59e0b;
+      border: 3px solid var(--trim);
       border-radius: 12px;
       background: #fef3c7;
       color: #78350f;
@@ -104,8 +105,9 @@
       overflow-wrap: anywhere;
       animation: pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
     }
-    #result strong { display: block; } /* the tea goes on its own line under "Čaj dneva (date):" */
-    #result-date { font-size: 0.6em; white-space: nowrap; }
+    /* Three lines: the date, "Čaj dneva:", then the tea. */
+    #result-date { display: block; font-size: 0.6em; }
+    #result strong { display: block; }
     @keyframes pop { from { transform: scale(0.6); opacity: 0; } }
     /* The tea list lives in a dialog pinned near the top of the window, so its add field stays
        clear of a phone's on-screen keyboard. The title and add field stay put while the list scrolls. */
@@ -128,25 +130,18 @@
 <body>
   <main>
     <header>
-      <svg class="cat" viewBox="0 0 64 64" aria-hidden="true">
-        <path class="cat-tail" d="M40 55 C54 56 60 46 53 36"/>
-        <path class="cat-fur" d="M17 58 C14 44 20 33 30 33 C40 33 46 44 43 58 Z"/>
-        <ellipse class="cat-cream" cx="30" cy="49" rx="6.5" ry="8"/>
-        <path class="cat-fur" d="M19.5 15 L18 3 L28.5 9.5 Z M40.5 15 L42 3 L31.5 9.5 Z"/>
-        <path class="cat-pink" d="M21 12 L20.2 6.5 L25.5 9.8 Z M39 12 L39.8 6.5 L34.5 9.8 Z"/>
-        <circle class="cat-fur" cx="30" cy="21" r="13"/>
-        <ellipse class="cat-cream" cx="30" cy="26" rx="6" ry="4.5"/>
-        <path class="cat-whiskers" d="M22 25 L12 23.5 M22 27 L12.5 28.5 M38 25 L48 23.5 M38 27 L47.5 28.5"/>
-        <circle class="cat-ink" cx="24.5" cy="20.5" r="1.9"/>
-        <circle class="cat-ink" cx="35.5" cy="20.5" r="1.9"/>
-        <circle class="cat-shine" cx="25.1" cy="19.9" r="0.6"/>
-        <circle class="cat-shine" cx="36.1" cy="19.9" r="0.6"/>
-        <path class="cat-pink" d="M28.4 24 L31.6 24 L30 26 Z"/>
-        <path class="cat-mouth" d="M30 26 q-2 3 -4.5 1 M30 26 q2 3 4.5 1"/>
-        <ellipse class="cat-cream" cx="25" cy="57.5" rx="4" ry="2.2"/>
-        <ellipse class="cat-cream" cx="35" cy="57.5" rx="4" ry="2.2"/>
+      <svg class="teapot" viewBox="0 0 64 64" aria-hidden="true">
+        <path class="pot-steam" d="M55 26 q-3 -3.5 0 -7 q3 -3.5 0 -7"/>
+        <path class="pot-steam" d="M60 27 q-3 -3.5 0 -7 q3 -3.5 0 -7"/>
+        <path class="pot-handle" d="M15 33 C3 31 3 51 16 50"/>
+        <path class="pot-body" d="M43 39 C50 38 49 33 53 30 L58.5 34 C54 37 56 46 45 50 Z"/>
+        <ellipse class="pot-body" cx="30" cy="42.5" rx="17" ry="15.5"/>
+        <ellipse class="pot-dark" cx="30" cy="57.5" rx="11" ry="2.5"/>
+        <path class="pot-dark" d="M18.5 30 Q30 19 41.5 30 Q30 33 18.5 30 Z"/>
+        <circle class="pot-dark" cx="30" cy="23" r="2.8"/>
+        <path class="pot-shine" d="M18 42 C19 36 23 33.5 27 33.5"/>
       </svg>
-      <h1>Izbirnik čaja</h1>
+      <h1>IZBIRNIK ČAJEV</h1>
     </header>
     <div id="wheel">
       <svg viewBox="-100 -100 200 200" role="img" aria-label="Vrteče se kolo z enim poljem za vsak čaj">
@@ -156,10 +151,10 @@
         <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
       </svg>
       <button id="spin-button" type="button" class="primary">Zavrti kolo!</button>
-      <p id="hint" hidden>Kolo je prazno. Čaje dodaš z gumbom »Uredi čaje«.</p>
-      <p id="result" role="status" hidden>Čaj dneva <span id="result-date"></span>: <strong id="result-name"></strong></p>
+      <p id="hint" hidden>Kolo je prazno. Čaje dodaš z gumbom »Seznam čajev«.</p>
+      <p id="result" role="status" hidden><span id="result-date"></span> Čaj dneva: <strong id="result-name"></strong></p>
     </div>
-    <button id="edit-teas" type="button" aria-haspopup="dialog">Uredi čaje</button>
+    <button id="edit-teas" type="button" aria-haspopup="dialog">Seznam čajev</button>
   </main>
   <dialog id="teas-dialog" aria-labelledby="teas-title">
     <div class="sheet-top">
@@ -416,7 +411,7 @@
       resultEl.hidden = !winner;
       // The sign shouts the name; the stored tea and its wheel label keep their own case.
       resultNameEl.textContent = winner ? signName(winner) : '';
-      resultDateEl.textContent = `(${DATE_FORMAT.format(new Date())})`;
+      resultDateEl.textContent = DATE_FORMAT.format(new Date());
     }
 
     function setWheelAngle(angle) {

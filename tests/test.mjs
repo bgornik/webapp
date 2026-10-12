@@ -111,19 +111,22 @@ try {
   check('no teas: blank wheel shown, spin button disabled, no labels', await ev(`const g = $('#wheel-spin'); return g.querySelectorAll('circle.empty').length === 1 && g.querySelectorAll('path, text').length === 0 && $('#spin-button').disabled && $('#wheel svg').getBoundingClientRect().width > 200;`));
   const order = await ev(`const top = s => $(s).getBoundingClientRect().top; return ['h1', '#wheel svg', '#spin-button', '#hint'].map(top);`);
   check('landing: heading, wheel, spin button, then the empty-wheel hint', order.every((v, i) => i === 0 || v > order[i - 1]), order.join(','));
-  check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš z gumbom »Uredi čaje«.';`));
+  check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš z gumbom »Seznam čajev«.';`));
   const head = await ev(`const mid = r => r.left + r.width / 2; const m = $('main').getBoundingClientRect(), range = document.createRange(); range.selectNodeContents($('h1'));
-    const text = range.getBoundingClientRect(), cat = $('.cat').getBoundingClientRect();
-    return { textOff: mid(text) - mid(m), catOff: mid(cat) - mid(m), weight: +getComputedStyle($('h1')).fontWeight, catAboveText: cat.bottom <= text.top + 12 && cat.top >= 0, catSize: cat.width, catHidden: $('.cat').getAttribute('aria-hidden') };`);
-  check('heading: "Izbirnik čaja" is centred and bold', Math.abs(head.textOff) < 1 && head.weight >= 700, JSON.stringify(head));
-  check('heading: a small cat sits centred on top of it, hidden from screen readers', Math.abs(head.catOff) < 1 && head.catAboveText && head.catSize >= 40 && head.catSize <= 64 && head.catHidden === 'true', JSON.stringify(head));
-  const wagA = await ev(`const tail = $('.cat-tail'), a = tail.getAnimations()[0], cs = getComputedStyle(tail); const body = $('.cat path.cat-fur');
-    return { name: cs.animationName, state: a && a.playState, endless: cs.animationIterationCount, seconds: parseFloat(cs.animationDuration), m: cs.transform, behindBody: !!(tail.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING), others: [...$('.cat').querySelectorAll('*')].filter(e => e !== tail && e.getAnimations().length).length };`);
-  await sleep(500);
-  const wagB = await ev(`return getComputedStyle($('.cat-tail')).transform;`);
-  check('cat: only the tail moves, slowly and endlessly, drawn behind the body', wagA.name === 'wag' && wagA.state === 'running' && wagA.endless === 'infinite' && wagA.seconds >= 1 && wagA.behindBody && wagA.others === 0 && wagA.m !== wagB, JSON.stringify(wagA) + ' -> ' + wagB);
+    const text = range.getBoundingClientRect(), pot = $('.teapot').getBoundingClientRect();
+    return { textOff: mid(text) - mid(m), potOff: mid(pot) - mid(m), weight: +getComputedStyle($('h1')).fontWeight, potAboveText: pot.bottom <= text.top + 12 && pot.top >= 0, potSize: pot.width, potHidden: $('.teapot').getAttribute('aria-hidden'), noCat: !document.querySelector('[class*=cat]'), text: $('h1').textContent };`);
+  check('heading: "IZBIRNIK ČAJEV" is centred and bold', head.text === 'IZBIRNIK ČAJEV' && Math.abs(head.textOff) < 1 && head.weight >= 700, JSON.stringify(head));
+  check('heading: a small teapot sits centred on top of it (the cat is gone), hidden from screen readers', head.noCat && Math.abs(head.potOff) < 1 && head.potAboveText && head.potSize >= 40 && head.potSize <= 64 && head.potHidden === 'true', JSON.stringify(head));
+  const steamA = await ev(`const wisps = [...document.querySelectorAll('.teapot .pot-steam')]; const pot = $('.teapot ellipse.pot-body').getBoundingClientRect();
+    return { wisps: wisps.length, names: wisps.map(w => getComputedStyle(w).animationName).join(), states: wisps.map(w => w.getAnimations()[0]?.playState).join(), endless: wisps.every(w => getComputedStyle(w).animationIterationCount === 'infinite'),
+      seconds: parseFloat(getComputedStyle(wisps[0]).animationDuration), staggered: getComputedStyle(wisps[0]).animationDelay !== getComputedStyle(wisps[1]).animationDelay,
+      abovePot: wisps.every(w => w.getBoundingClientRect().bottom <= pot.top + 2), others: [...$('.teapot').querySelectorAll('*')].filter(e => !e.classList.contains('pot-steam') && e.getAnimations().length).length,
+      frame: wisps.map(w => getComputedStyle(w).transform + getComputedStyle(w).opacity).join(), parts: ['.pot-handle', 'path.pot-body', 'ellipse.pot-body', '.pot-shine'].every(q => $('.teapot ' + q)) };`);
+  await sleep(600);
+  const steamB = await ev(`return [...document.querySelectorAll('.teapot .pot-steam')].map(w => getComputedStyle(w).transform + getComputedStyle(w).opacity).join();`);
+  check('teapot: has body, spout, handle and lid; only the steam moves, slowly and endlessly', steamA.wisps === 2 && steamA.names === 'steam,steam' && steamA.states === 'running,running' && steamA.endless && steamA.seconds >= 2 && steamA.staggered && steamA.abovePot && steamA.others === 0 && steamA.parts && steamA.frame !== steamB, JSON.stringify(steamA) + ' -> ' + steamB);
   const opener = await ev(`const mid = r => r.left + r.width / 2; const b = $('#edit-teas').getBoundingClientRect(); return { text: $('#edit-teas').textContent, belowHint: b.top >= $('#hint').getBoundingClientRect().bottom, off: mid(b) - mid($('main').getBoundingClientRect()) };`);
-  check('landing: "Uredi čaje" button sits centred below the wheel section', opener.text === 'Uredi čaje' && opener.belowHint && Math.abs(opener.off) < 1, JSON.stringify(opener));
+  check('landing: "Seznam čajev" button sits centred below the wheel section', opener.text === 'Seznam čajev' && opener.belowHint && Math.abs(opener.off) < 1, JSON.stringify(opener));
   check('landing: tea editor is closed, none of it is shown', await ev(`return !dialog.open && editorParts.every(s => !shown(s)) && [...$('main').children].map(e => e.tagName + '#' + e.id).join() === 'HEADER#,DIV#wheel,BUTTON#edit-teas';`));
 
   await clickAt(...await ev(`return middle('#edit-teas');`));
@@ -271,8 +274,8 @@ try {
   // ---- spin button, landing, sign, confetti ----
   const spinHelpers = `
     const spinBtn = $('#spin-button');
-    // The sign reads "Čaj dneva (pon., 12. okt.): SENCHA"; the date is checked separately and dropped here.
-    const sign = () => $('#result').hidden ? null : $('#result').textContent.replace(/ \\([^)]*\\)/, '');
+    // The sign reads "pon., 12. okt." / "Čaj dneva:" / "SENCHA"; the date is checked separately and dropped here.
+    const sign = () => $('#result').hidden ? null : $('#result').textContent.replace($('#result-date').textContent, '').trim();
     // Rendered rotation, read back from the browser rather than from the app's own state.
     const shownAngle = () => { const m = new DOMMatrix(getComputedStyle(spin).transform); return Math.atan2(m.b, m.a) * 180 / Math.PI; };
     // Which label points straight up at the pointer, and how far off-centre it is.
@@ -295,7 +298,7 @@ try {
   const sv = expr => run(helpers + wheelHelpers + spinHelpers + expr);
   const landedOk = s => s.sign === `Čaj dneva: ${s.tea.toUpperCase()}` && s.sliceIsWinner && s.winners === 1 && s.off < s.half * 0.75 && !s.disabled;
 
-  check('title and heading are "Izbirnik čaja", page language is Slovenian', await sv(`return document.title === 'Izbirnik čaja' && $('h1').textContent === 'Izbirnik čaja' && document.documentElement.lang === 'sl';`));
+  check('tab title is "Izbirnik čajev", heading "IZBIRNIK ČAJEV", page language is Slovenian', await sv(`return document.title === 'Izbirnik čajev' && $('h1').textContent === 'IZBIRNIK ČAJEV' && document.documentElement.lang === 'sl';`));
   await sv(`['Earl Grey', 'Sencha', 'Rooibos', 'Oolong', 'Chai'].forEach(add);`);
   check('spin button: labelled, enabled, below the wheel; no sign yet', await sv(`return spinBtn.textContent === 'Zavrti kolo!' && !spinBtn.disabled && spinBtn.getBoundingClientRect().top >= $('#wheel svg').getBoundingClientRect().bottom && sign() === null;`));
   check('idle: still spinning slowly before any spin', await sv(`const a = spin.getAnimations(); return a.length === 1 && a[0].effect.getTiming().duration === 40000 && a[0].playState === 'running';`));
@@ -315,9 +318,9 @@ try {
   check('land: sign names the tea under the pointer, slice highlighted, button re-enabled', landedOk(landed), JSON.stringify(landed));
   check('landing: sign appears below the spin button, tea editor stays closed', await sv(`const r = $('#result').getBoundingClientRect(); return r.top >= spinBtn.getBoundingClientRect().bottom && !dialog.open && editorParts.every(s => !shown(s));`));
   const dated = await sv(`const now = new Date();
-    const expected = '(' + ['ned.', 'pon.', 'tor.', 'sre.', 'čet.', 'pet.', 'sob.'][now.getDay()] + ', ' + now.getDate() + '. ' + ['jan.', 'feb.', 'mar.', 'apr.', 'maj', 'jun.', 'jul.', 'avg.', 'sep.', 'okt.', 'nov.', 'dec.'][now.getMonth()] + ')';
+    const expected = ['ned.', 'pon.', 'tor.', 'sre.', 'čet.', 'pet.', 'sob.'][now.getDay()] + ', ' + now.getDate() + '. ' + ['jan.', 'feb.', 'mar.', 'apr.', 'maj', 'jun.', 'jul.', 'avg.', 'sep.', 'okt.', 'nov.', 'dec.'][now.getMonth()];
     return { expected, date: $('#result-date').textContent, full: $('#result').textContent, smaller: parseFloat(getComputedStyle($('#result-date')).fontSize) < parseFloat(getComputedStyle($('#result')).fontSize) };`);
-  check('sign: carries today\'s date, abbreviated, with the weekday, in Slovenian', dated.date === dated.expected && dated.full.startsWith(`Čaj dneva ${dated.expected}: `) && dated.smaller, JSON.stringify(dated));
+  check('sign: carries today\'s date, abbreviated, with the weekday, in Slovenian', dated.date === dated.expected && dated.full.startsWith(`${dated.expected} Čaj dneva: `) && dated.smaller, JSON.stringify(dated));
   check('land: wheel is at rest on the winner', landed.anims === 0, JSON.stringify(landed));
   check('land: confetti canvas appears', landed.confetti === 1);
   check('land: sign is big and in view', await sv(`const r = $('#result').getBoundingClientRect(); return parseFloat(getComputedStyle($('#result')).fontSize) >= 24 && r.top >= 0;`));
@@ -373,9 +376,12 @@ try {
   // Uppercase sign, original case everywhere else (list is down to one tea here).
   await sv(`btn(texts()[0], 'Uredi').click(); const i = $('#list li form input'); i.value = 'žajbelj Čaj šipek'; i.closest('form').requestSubmit();`);
   const up = await sv(`return { sign: sign(), shown: $('#result').innerText, list: texts(), wheel: labels(), stored: stored() };`);
-  check('sign shows the tea in uppercase, including č/š/ž', up.sign === 'Čaj dneva: ŽAJBELJ ČAJ ŠIPEK' && up.shown.replace(/ \([^)]*\)/, '') === 'Čaj dneva:\nŽAJBELJ ČAJ ŠIPEK', JSON.stringify(up));
-  const lines = await sv(`const range = document.createRange(); range.setStart($('#result'), 0); range.setEndBefore($('#result-name')); const label = range.getBoundingClientRect(); const name = $('#result-name').getBoundingClientRect(); const box = $('#result').getBoundingClientRect(); return { labelText: range.toString().trim().replace(/ \\([^)]*\\)/, ''), labelLines: range.getClientRects().length, labelBottom: label.bottom, nameTop: name.top, labelMid: label.left + label.width / 2, nameMid: name.left + name.width / 2, boxMid: box.left + box.width / 2, nameInside: name.bottom <= box.bottom, nameLines: Math.round(name.height / parseFloat(getComputedStyle($('#result')).lineHeight)) };`);
-  check('sign: "Čaj dneva (date):" on its own line, tea on the next line, both centred', lines.labelText === 'Čaj dneva:' && lines.nameTop >= lines.labelBottom - 4 && lines.nameLines === 1 && Math.abs(lines.labelMid - lines.boxMid) < 2 && Math.abs(lines.nameMid - lines.boxMid) < 2 && lines.nameInside, JSON.stringify(lines));
+  check('sign shows the tea in uppercase, including č/š/ž', up.sign === 'Čaj dneva: ŽAJBELJ ČAJ ŠIPEK' && up.shown.split('\n').length === 3 && up.shown.split('\n').slice(1).join('\n') === 'Čaj dneva:\nŽAJBELJ ČAJ ŠIPEK', JSON.stringify(up));
+  const lines = await sv(`const mid = r => r.left + r.width / 2; const range = document.createRange(); range.setStartAfter($('#result-date')); range.setEndBefore($('#result-name'));
+    const date = $('#result-date').getBoundingClientRect(), label = range.getBoundingClientRect(), name = $('#result-name').getBoundingClientRect(), box = $('#result').getBoundingClientRect();
+    return { labelText: range.toString().trim(), dateText: $('#result-date').textContent, order: [date.top, date.bottom, label.top, label.bottom, name.top, name.bottom].map(Math.round), offs: [date, label, name].map(r => Math.round(mid(r) - mid(box))), inside: date.top >= box.top && name.bottom <= box.bottom,
+      rows: [range.getClientRects().length, Math.round(name.height / parseFloat(getComputedStyle($('#result')).lineHeight))] };`);
+  check('sign: three centred lines, the date first, then "Čaj dneva:", then the tea', lines.labelText === 'Čaj dneva:' && /^[a-zčš]{3}\.?, \d{1,2}\. [a-z]{3}\.?$/.test(lines.dateText) && lines.order[1] <= lines.order[2] + 4 && lines.order[0] < lines.order[2] && lines.order[3] <= lines.order[4] + 4 && lines.order[2] < lines.order[4] && lines.offs.every(o => Math.abs(o) < 2) && lines.inside && lines.rows.join() === '1,1', JSON.stringify(lines));
   check('list, wheel label and saved data keep the original case', [up.list, up.wheel, up.stored].every(a => a.length === 1 && a[0] === 'žajbelj Čaj šipek'), JSON.stringify(up));
   await sv(`btn('žajbelj Čaj šipek', 'Uredi').click(); const i = $('#list li form input'); i.value = 'ALREADY UPPER 123'; i.closest('form').requestSubmit();`);
   check('an already-uppercase tea is unchanged on the sign', await sv(`return sign() === 'Čaj dneva: ALREADY UPPER 123';`), await sv(`return sign();`));
@@ -476,10 +482,10 @@ try {
     for (const type of ['touchStart', 'touchEnd']) await send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchStart' ? [{ x, y }] : [] });
     await sleep(300);
   };
-  check('phone: cat, heading, wheel, spin button and "Uredi čaje" all fit on the first screen', await sv(`return scrollY === 0 && $('#edit-teas').getBoundingClientRect().bottom <= innerHeight && $('.cat').getBoundingClientRect().top >= 0 && spinBtn.getBoundingClientRect().bottom <= $('#edit-teas').getBoundingClientRect().top;`));
+  check('phone: teapot, heading, wheel, spin button and "Seznam čajev" all fit on the first screen', await sv(`return scrollY === 0 && $('#edit-teas').getBoundingClientRect().bottom <= innerHeight && $('.teapot').getBoundingClientRect().top >= 0 && spinBtn.getBoundingClientRect().bottom <= $('#edit-teas').getBoundingClientRect().top;`));
   await tap(...await sv(`return middle('#edit-teas');`));
   const sheet = await sv(`const d = dialog.getBoundingClientRect(), i = $('#add-input').getBoundingClientRect(); return { open: dialog.open, left: d.left, right: d.right, top: d.top, bottom: d.bottom, vw: innerWidth, vh: innerHeight, inputBottom: i.bottom, rows: document.querySelectorAll('#list li').length, rowsShown: [...document.querySelectorAll('#list li')].every(li => li.getBoundingClientRect().bottom <= d.bottom) };`);
-  check('phone: tapping "Uredi čaje" opens the editor, inside the screen', sheet.open && sheet.left >= 0 && sheet.right <= sheet.vw && sheet.top >= 0 && sheet.bottom <= sheet.vh && sheet.rows === 5, JSON.stringify(sheet));
+  check('phone: tapping "Seznam čajev" opens the editor, inside the screen', sheet.open && sheet.left >= 0 && sheet.right <= sheet.vw && sheet.top >= 0 && sheet.bottom <= sheet.vh && sheet.rows === 5, JSON.stringify(sheet));
   check('phone: add field sits in the top half, clear of an on-screen keyboard', sheet.inputBottom < sheet.vh / 2, JSON.stringify(sheet));
   const shotE = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(scratch, 'phone-editor.png'), Buffer.from(shotE.result.data, 'base64'));
@@ -497,8 +503,9 @@ try {
   writeFileSync(join(scratch, 'phone.png'), Buffer.from(shotP.result.data, 'base64'));
   await sleep(1200);
   const signBox = await sv(`const r = $('#result').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, vh: innerHeight };`);
-  const phoneSign = await sv(`const range = document.createRange(); range.setStart($('#result'), 0); range.setEndBefore($('#result-name')); const tops = new Set([...range.getClientRects()].map(r => Math.round(r.bottom))); return { label: range.toString(), labelRows: tops.size, editBelow: $('#edit-teas').getBoundingClientRect().top >= $('#result').getBoundingClientRect().bottom, allOnScreen: $('#edit-teas').getBoundingClientRect().bottom <= innerHeight + scrollY };`);
-  check('phone: "Čaj dneva (date):" fits on one line; edit button below the sign', phoneSign.labelRows <= 2 && phoneSign.editBelow, JSON.stringify(phoneSign));
+  const phoneSign = await sv(`const range = document.createRange(); range.setStartAfter($('#result-date')); range.setEndBefore($('#result-name')); const lh = parseFloat(getComputedStyle($('#result-date')).lineHeight);
+    return { dateRows: Math.round($('#result-date').getBoundingClientRect().height / lh), labelRows: range.getClientRects().length, dateFirst: $('#result-date').getBoundingClientRect().bottom <= range.getBoundingClientRect().top + 4, editBelow: $('#edit-teas').getBoundingClientRect().top >= $('#result').getBoundingClientRect().bottom };`);
+  check('phone: date line, then "Čaj dneva:", each on one line; list button below the sign', phoneSign.dateRows === 1 && phoneSign.labelRows === 1 && phoneSign.dateFirst && phoneSign.editBelow, JSON.stringify(phoneSign));
   check('phone: sign ends up fully on screen', signBox.top >= 0 && signBox.bottom <= signBox.vh + 0.5, JSON.stringify(signBox));
   const shotQ = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(scratch, 'phone-settled.png'), Buffer.from(shotQ.result.data, 'base64'));
@@ -516,6 +523,11 @@ try {
       const a = lum(rim), b = lum(page); const [r, g, bl] = rim.match(/[\\d.]+/g).map(Number);
       return { scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', rim, page, contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), colourful: Math.max(r, g, bl) - Math.min(r, g, bl) > 80 };`);
     check(`wheel rim (${scheme} theme): a real colour that contrasts with the page background`, rimColour.scheme === scheme && rimColour.rim !== rimColour.page && rimColour.contrast >= 3 && rimColour.colourful, JSON.stringify(rimColour));
+    await ev(`$('#spin-button').click(); document.getElementById('wheel-spin').getAnimations()[0].finish();`);
+    await sleep(600);
+    const trim = await ev(`const cs = getComputedStyle($('#result')); return { shown: !$('#result').hidden, rim: getComputedStyle($('#wheel .rim')).stroke, sides: [cs.borderTopColor, cs.borderRightColor, cs.borderBottomColor, cs.borderLeftColor], width: cs.borderTopWidth, style: cs.borderTopStyle };`);
+    check(`sign border (${scheme} theme): same colour as the wheel rim`, trim.shown && trim.sides.every(c => c === trim.rim) && trim.style === 'solid' && parseFloat(trim.width) >= 2, JSON.stringify(trim));
+    await ev(`window.scrollTo(0, 0);`);
     const shotT = await send('Page.captureScreenshot', { format: 'png' });
     writeFileSync(join(scratch, `landing-${scheme}.png`), Buffer.from(shotT.result.data, 'base64'));
     if (scheme === 'dark') {
@@ -537,7 +549,7 @@ try {
     $('#add-input').value = ''; $('#add-form').requestSubmit();
     return (seen + ' | ' + err()).match(/\\b(add|edit|delete|save|cancel|tea|teas|spin|wheel|string|strings|characters?|day|new|yet|enter|close|empty|button)\\b/gi);`);
   check('no English UI text remains', english === null, String(english));
-  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['Izbirnik čaja', 'Uredi čaje', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva (', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
+  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['IZBIRNIK ČAJEV', 'Seznam čajev', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
 
   check('no uncaught page errors', errors.length === 0, errors.join('; '));
   // Ask Chrome to quit by itself: killing only the main process leaves helpers that keep writing to the profile.
