@@ -35,8 +35,12 @@ const cleanup = async () => {
   server.close();
   if (chrome.exitCode === null && !chromeError) {
     const exited = new Promise(r => chrome.once('exit', r));
-    chrome.kill();
-    await Promise.race([exited, sleep(5000)]);
+    await Promise.race([exited, sleep(1500)]);
+    if (chrome.exitCode === null) {
+      chrome.kill();
+      await Promise.race([exited, sleep(5000)]);
+    }
+    await sleep(300);
   }
   try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
 };
@@ -536,7 +540,8 @@ try {
   check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['Izbirnik čaja', 'Uredi čaje', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva (', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
 
   check('no uncaught page errors', errors.length === 0, errors.join('; '));
-  ws.close();
+  // Ask Chrome to quit by itself: killing only the main process leaves helpers that keep writing to the profile.
+  await Promise.race([send('Browser.close'), sleep(2000)]);
 } catch (e) {
   failures++;
   console.log('ERROR', e.stack || e);
