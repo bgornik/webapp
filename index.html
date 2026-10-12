@@ -79,9 +79,6 @@
     }
     @keyframes pop { from { transform: scale(0.6); opacity: 0; } }
     .confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-    @media (prefers-reduced-motion: reduce) {
-      #result { animation: none; }
-    }
   </style>
 </head>
 <body>
@@ -138,7 +135,6 @@
     const CONFETTI_MS = 3500;
     const CONFETTI_COUNT = 180;
     const CONFETTI_COLORS = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#facc15'];
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     let items = load();
     let editingId = null;
@@ -317,7 +313,7 @@
     }
 
     function startIdle() {
-      if (spinning || wheelAnimation || reducedMotion.matches) return;
+      if (spinning || wheelAnimation) return;
       wheelAnimation = spinEl.animate(
         { transform: [`rotate(${wheelAngle}deg)`, `rotate(${wheelAngle + 360}deg)`] },
         { duration: IDLE_TURN_MS, iterations: Infinity },
@@ -347,10 +343,6 @@
       const landing = (index + 0.15 + Math.random() * 0.7) * step;
       const target = wheelAngle + SPIN_TURNS * 360 + ((360 - landing - wheelAngle) % 360 + 360) % 360;
 
-      if (reducedMotion.matches) {
-        land(target);
-        return;
-      }
       wheelAnimation = spinEl.animate(
         { transform: [`rotate(${wheelAngle}deg)`, `rotate(${target}deg)`] },
         { duration: SPIN_MS, easing: SPIN_EASING, fill: 'forwards' },
@@ -371,7 +363,10 @@
       renderWheel();
       if (winner) {
         celebrate();
-        resultEl.scrollIntoView({ block: 'nearest', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+        // Measured on the container: the sign itself is still mid pop-in and reports a smaller box.
+        if (wheelEl.getBoundingClientRect().bottom > window.innerHeight) {
+          wheelEl.scrollIntoView({ block: 'end', behavior: 'smooth' });
+        }
       }
       idleTimer = setTimeout(startIdle, HOLD_MS);
     }
@@ -379,7 +374,6 @@
     // Bursts confetti out of the middle of the wheel on a throwaway full-window canvas.
     function celebrate() {
       document.querySelectorAll('.confetti').forEach(el => el.remove());
-      if (reducedMotion.matches) return;
 
       const canvas = document.createElement('canvas');
       canvas.className = 'confetti';
