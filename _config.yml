@@ -1,0 +1,5 @@
+# GitHub Pages publishes every file in the repo unless told otherwise.
+# Keep the site to the page itself.
+exclude:
+  - README.md
+  - tests
