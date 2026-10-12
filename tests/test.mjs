@@ -328,7 +328,7 @@ try {
   const glowA = await sv(`const cs = getComputedStyle(spinBtn), a = spinBtn.getAnimations()[0]; return { name: cs.animationName, endless: cs.animationIterationCount, seconds: parseFloat(cs.animationDuration), state: a && a.playState, bg: cs.backgroundColor };`);
   await sleep(1500);
   const glowB = await sv(`return getComputedStyle(spinBtn).backgroundColor;`);
-  check('spin button: background drifts slowly from colour to colour, endlessly', glowA.name === 'glow' && glowA.endless === 'infinite' && glowA.seconds >= 6 && glowA.state === 'running' && glowA.bg !== glowB, JSON.stringify(glowA) + ' -> ' + glowB);
+  check('spin button: background shifts from colour to colour every few seconds, endlessly', glowA.name === 'glow' && glowA.endless === 'infinite' && glowA.seconds >= 3 && glowA.seconds <= 5 && glowA.state === 'running' && glowA.bg !== glowB, JSON.stringify(glowA) + ' -> ' + glowB);
   check('idle: still spinning slowly before any spin', await sv(`const a = spin.getAnimations(); return a.length === 1 && a[0].effect.getTiming().duration === 40000 && a[0].playState === 'running';`));
 
   // One spin in real time.
