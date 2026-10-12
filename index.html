@@ -3,9 +3,229 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hello World</title>
+  <title>Strings</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --border: #c9ccd1;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --danger: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --border: #3f434a;
+        --muted: #9ca3af;
+        --accent: #60a5fa;
+        --danger: #f87171;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 2rem 1rem;
+      font: 1rem/1.5 system-ui, sans-serif;
+    }
+    main { max-width: 32rem; margin: 0 auto; }
+    h1 { margin: 0 0 1rem; }
+    form { display: flex; gap: 0.5rem; }
+    input, button {
+      font: inherit;
+      padding: 0.4rem 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    input { flex: 1; min-width: 0; }
+    button { cursor: pointer; white-space: nowrap; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    @media (prefers-color-scheme: dark) {
+      button.primary { color: #0b1220; }
+    }
+    button.danger { color: var(--danger); }
+    #error { color: var(--danger); margin: 0.5rem 0 0; }
+    #empty { color: var(--muted); }
+    ul { list-style: none; margin: 1rem 0 0; padding: 0; }
+    li {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    li .text { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+    li form { flex: 1; min-width: 0; }
+  </style>
 </head>
 <body>
-  <h1>Hello, World!</h1>
+  <main>
+    <h1>Strings</h1>
+    <form id="add-form">
+      <input id="add-input" type="text" maxlength="20" placeholder="Add a string (max 20 characters)" aria-label="New string" autocomplete="off">
+      <button type="submit" class="primary">Add</button>
+    </form>
+    <p id="error" role="alert" hidden></p>
+    <ul id="list"></ul>
+    <p id="empty" hidden>No strings yet.</p>
+  </main>
+  <script>
+    // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
+    const STORAGE_KEY = 'webapp.strings';
+    const MAX_LENGTH = 20;
+
+    const addForm = document.getElementById('add-form');
+    const addInput = document.getElementById('add-input');
+    const errorEl = document.getElementById('error');
+    const listEl = document.getElementById('list');
+    const emptyEl = document.getElementById('empty');
+
+    let items = load();
+    let editingId = null;
+
+    function load() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(item => item && typeof item.id === 'string' && typeof item.text === 'string');
+      } catch {
+        return [];
+      }
+    }
+
+    function save() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      } catch {
+        showError('Could not save: browser storage is unavailable or full.');
+      }
+    }
+
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.hidden = !message;
+    }
+
+    // Returns the cleaned string, or null after showing why it was rejected.
+    function validate(raw) {
+      const text = raw.trim();
+      if (!text) {
+        showError('Enter at least one character.');
+        return null;
+      }
+      if (text.length > MAX_LENGTH) {
+        showError(`Strings can be at most ${MAX_LENGTH} characters.`);
+        return null;
+      }
+      showError('');
+      return text;
+    }
+
+    function newId() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+
+    function button(label, className, onClick) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.textContent = label;
+      if (className) el.className = className;
+      el.addEventListener('click', onClick);
+      return el;
+    }
+
+    function renderItem(item) {
+      const li = document.createElement('li');
+      li.dataset.id = item.id;
+
+      if (item.id === editingId) {
+        const form = document.createElement('form');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.maxLength = MAX_LENGTH;
+        input.value = item.text;
+        input.setAttribute('aria-label', 'Edit string');
+        input.autocomplete = 'off';
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Escape') stopEditing();
+        });
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'submit';
+        saveButton.className = 'primary';
+        saveButton.textContent = 'Save';
+
+        form.append(input, saveButton, button('Cancel', '', stopEditing));
+        form.addEventListener('submit', event => {
+          event.preventDefault();
+          const text = validate(input.value);
+          if (text === null) return;
+          item.text = text;
+          save();
+          stopEditing();
+        });
+        li.append(form);
+        return li;
+      }
+
+      const text = document.createElement('span');
+      text.className = 'text';
+      text.textContent = item.text;
+      li.append(
+        text,
+        button('Edit', '', () => startEditing(item.id)),
+        button('Delete', 'danger', () => remove(item.id)),
+      );
+      return li;
+    }
+
+    function render() {
+      listEl.replaceChildren(...items.map(renderItem));
+      emptyEl.hidden = items.length > 0;
+      const editInput = listEl.querySelector('li form input');
+      if (editInput) {
+        editInput.focus();
+        editInput.select();
+      }
+    }
+
+    function startEditing(id) {
+      editingId = id;
+      showError('');
+      render();
+    }
+
+    function stopEditing() {
+      editingId = null;
+      showError('');
+      render();
+    }
+
+    function remove(id) {
+      items = items.filter(item => item.id !== id);
+      if (editingId === id) editingId = null;
+      save();
+      render();
+    }
+
+    addForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const text = validate(addInput.value);
+      if (text === null) return;
+      items.unshift({ id: newId(), text });
+      save();
+      addInput.value = '';
+      render();
+      addInput.focus();
+    });
+
+    // Keep other open tabs of this page in step.
+    window.addEventListener('storage', event => {
+      if (event.key !== STORAGE_KEY && event.key !== null) return;
+      items = load();
+      if (!items.some(item => item.id === editingId)) editingId = null;
+      render();
+    });
+
+    render();
+  </script>
 </body>
 </html>
