@@ -154,7 +154,7 @@
       color: #78350f;
       font-size: clamp(1.5rem, 6vw, 2.25rem);
       font-weight: 700;
-      line-height: 1.25;
+      line-height: 1.7;
       overflow-wrap: anywhere;
     }
     /* Three lines: the date, "Čaj dneva:", then the tea. */
@@ -209,7 +209,7 @@
   <dialog id="teas-dialog" aria-labelledby="teas-title">
     <div class="sheet-top">
       <div class="sheet-title">
-        <h2 id="teas-title">Čaji</h2>
+        <h2 id="teas-title">Seznam čajev</h2>
         <button id="close-teas" type="button">Zapri</button>
       </div>
       <form id="add-form">
@@ -260,7 +260,7 @@
     const HOLD_MS = 6000; // how long the wheel rests on the winner before idling again
     const CONFETTI_MS = 3500;
     const CONFETTI_COUNT = 180;
-    const DATE_FORMAT = new Intl.DateTimeFormat('sl', { weekday: 'short', day: 'numeric', month: 'short' }); // "pon., 12. okt."
+    const DATE_FORMAT = new Intl.DateTimeFormat('sl', { weekday: 'long', day: 'numeric', month: 'long' }); // "ponedeljek, 12. oktober"
     const CONFETTI_COLORS = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#facc15'];
 
     let items = load();

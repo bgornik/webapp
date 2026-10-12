@@ -150,8 +150,8 @@ try {
   check('landing: tea editor is closed, none of it is shown', await ev(`return !dialog.open && editorParts.every(s => !shown(s)) && [...$('main').children].map(e => e.tagName + '#' + e.id).join() === 'HEADER#,DIV#wheel,BUTTON#edit-teas';`));
 
   await clickAt(...await ev(`return middle('#edit-teas');`));
-  const opened = await ev(`return { open: dialog.open, modal: dialog.matches(':modal'), parts: editorParts.filter(s => s !== '#list').every(shown), title: $('#teas-title').textContent, labelled: dialog.getAttribute('aria-labelledby'), focusInside: dialog.contains(document.activeElement), focus: document.activeElement.id, pageLocked: getComputedStyle(document.documentElement).overflow };`);
-  check('editor: clicking the button opens a modal dialog titled "Čaji"', opened.open && opened.modal && opened.parts && opened.title === 'Čaji' && opened.labelled === 'teas-title', JSON.stringify(opened));
+  const opened = await ev(`return { open: dialog.open, modal: dialog.matches(':modal'), parts: editorParts.filter(s => s !== '#list').every(shown), title: $('#teas-title').textContent, button: $('#edit-teas').textContent, labelled: dialog.getAttribute('aria-labelledby'), focusInside: dialog.contains(document.activeElement), focus: document.activeElement.id, pageLocked: getComputedStyle(document.documentElement).overflow };`);
+  check('editor: clicking the button opens a modal dialog titled "Seznam čajev", like the button', opened.open && opened.modal && opened.parts && opened.title === 'Seznam čajev' && opened.title === opened.button && opened.labelled === 'teas-title', JSON.stringify(opened));
   check('editor: focus moves into the dialog (not the text field, so a phone keyboard stays down)', opened.focusInside && opened.focus === 'close-teas', JSON.stringify(opened));
   check('editor: page behind the dialog cannot scroll', opened.pageLocked === 'hidden', opened.pageLocked);
   const place = await ev(`const d = dialog.getBoundingClientRect(), w = $('#wheel svg').getBoundingClientRect(); return { left: d.left, right: d.right, top: d.top, bottom: d.bottom, vw: innerWidth, vh: innerHeight, coversWheelTop: d.top < w.bottom };`);
@@ -300,7 +300,7 @@ try {
   // ---- spin button, landing, sign, confetti ----
   const spinHelpers = `
     const spinBtn = $('#spin-button');
-    // The sign reads "pon., 12. okt." / "Čaj dneva:" / "SENCHA"; the date is checked separately and dropped here.
+    // The sign reads "ponedeljek, 12. oktober" / "Čaj dneva:" / "SENCHA"; the date is checked separately and dropped here.
     const sign = () => ($('#result').hidden || getComputedStyle($('#result')).visibility === 'hidden') ? null : $('#result').textContent.replace($('#result-date').textContent, '').trim();
     // Rendered rotation, read back from the browser rather than from the app's own state.
     const shownAngle = () => { const m = new DOMMatrix(getComputedStyle(spin).transform); return Math.atan2(m.b, m.a) * 180 / Math.PI; };
@@ -364,9 +364,9 @@ try {
   check('land: sign names the tea under the pointer, slice highlighted, button re-enabled', landedOk(landed), JSON.stringify(landed));
   check('landing: sign appears below the spin button, tea editor stays closed', await sv(`const r = $('#result').getBoundingClientRect(); return r.top >= spinBtn.getBoundingClientRect().bottom && !dialog.open && editorParts.every(s => !shown(s));`));
   const dated = await sv(`const now = new Date();
-    const expected = ['ned.', 'pon.', 'tor.', 'sre.', 'čet.', 'pet.', 'sob.'][now.getDay()] + ', ' + now.getDate() + '. ' + ['jan.', 'feb.', 'mar.', 'apr.', 'maj', 'jun.', 'jul.', 'avg.', 'sep.', 'okt.', 'nov.', 'dec.'][now.getMonth()];
+    const expected = ['nedelja', 'ponedeljek', 'torek', 'sreda', 'četrtek', 'petek', 'sobota'][now.getDay()] + ', ' + now.getDate() + '. ' + ['januar', 'februar', 'marec', 'april', 'maj', 'junij', 'julij', 'avgust', 'september', 'oktober', 'november', 'december'][now.getMonth()];
     return { expected, date: $('#result-date').textContent, full: $('#result').textContent, smaller: parseFloat(getComputedStyle($('#result-date')).fontSize) < parseFloat(getComputedStyle($('#result')).fontSize) };`);
-  check('sign: carries today\'s date, abbreviated, with the weekday, in Slovenian', dated.date === dated.expected && dated.full.startsWith(`${dated.expected} Čaj dneva: `) && dated.smaller, JSON.stringify(dated));
+  check('sign: carries today\'s date with the weekday and month written out in full, in Slovenian', !dated.date.includes('.,') && !/\.$/.test(dated.date) && dated.date === dated.expected && dated.full.startsWith(`${dated.expected} Čaj dneva: `) && dated.smaller, JSON.stringify(dated));
   check('land: wheel is at rest on the winner', landed.anims === 0, JSON.stringify(landed));
   check('land: confetti canvas appears', landed.confetti === 1);
   check('land: sign is big and in view', await sv(`const r = $('#result').getBoundingClientRect(); return parseFloat(getComputedStyle($('#result')).fontSize) >= 24 && r.top >= 0;`));
@@ -442,7 +442,12 @@ try {
     const date = $('#result-date').getBoundingClientRect(), label = range.getBoundingClientRect(), name = $('#result-name').getBoundingClientRect(), box = $('#result').getBoundingClientRect();
     return { labelText: range.toString().trim(), dateText: $('#result-date').textContent, order: [date.top, date.bottom, label.top, label.bottom, name.top, name.bottom].map(Math.round), offs: [date, label, name].map(r => Math.round(mid(r) - mid(box))), inside: date.top >= box.top && name.bottom <= box.bottom,
       rows: [range.getClientRects().length, Math.round(name.height / parseFloat(getComputedStyle($('#result')).lineHeight))] };`);
-  check('sign: three centred lines, the date first, then "Čaj dneva:", then the tea', lines.labelText === 'Čaj dneva:' && /^[a-zčš]{3}\.?, \d{1,2}\. [a-z]{3}\.?$/.test(lines.dateText) && lines.order[1] <= lines.order[2] + 4 && lines.order[0] < lines.order[2] && lines.order[3] <= lines.order[4] + 4 && lines.order[2] < lines.order[4] && lines.offs.every(o => Math.abs(o) < 2) && lines.inside && lines.rows.join() === '1,1', JSON.stringify(lines));
+  const spacing = await sv(`const r = $('#result'), cs = getComputedStyle(r); r.getAnimations().forEach(a => a.finish()); // the pop-in scales the sign while it runs
+    const range = document.createRange(); range.setStartAfter($('#result-date')); range.setEndBefore($('#result-name'));
+    const mid = b => (b.top + b.bottom) / 2; const size = parseFloat(cs.fontSize); const d = document.createRange(); d.selectNodeContents($('#result-date')); const n = document.createRange(); n.selectNodeContents($('#result-name'));
+    return { ratio: parseFloat(cs.lineHeight) / size, labelToTea: (mid(n.getBoundingClientRect()) - mid(range.getBoundingClientRect())) / size, dateToLabel: (mid(range.getBoundingClientRect()) - mid(d.getBoundingClientRect())) / size, inside: n.getBoundingClientRect().bottom <= r.getBoundingClientRect().bottom };`);
+  check('sign: lines are generously spaced (1.7 line height; was 1.25)', Math.abs(spacing.ratio - 1.7) < 0.01 && Math.abs(spacing.labelToTea - 1.7) < 0.05 && spacing.dateToLabel > 1.2 && spacing.inside, JSON.stringify(spacing));
+  check('sign: three centred lines, the date first, then "Čaj dneva:", then the tea', lines.labelText === 'Čaj dneva:' && /^[a-zčš]{4,}, \d{1,2}\. [a-z]{3,}$/.test(lines.dateText) && lines.order[1] <= lines.order[2] + 4 && lines.order[0] < lines.order[2] && lines.order[3] <= lines.order[4] + 4 && lines.order[2] < lines.order[4] && lines.offs.every(o => Math.abs(o) < 2) && lines.inside && lines.rows.join() === '1,1', JSON.stringify(lines));
   check('list, wheel label and saved data keep the original case', [up.list, up.wheel, up.stored].every(a => a.length === 1 && a[0] === 'žajbelj Čaj šipek'), JSON.stringify(up));
   await sv(`btn('žajbelj Čaj šipek', 'Uredi').click(); const i = $('#list li form input'); i.value = 'ALREADY UPPER 123'; i.closest('form').requestSubmit();`);
   check('an already-uppercase tea is unchanged on the sign', await sv(`return sign() === 'Čaj dneva: ALREADY UPPER 123';`), await sv(`return sign();`));
@@ -507,7 +512,7 @@ try {
 
   // ---- the day of the pick is saved with it, and that saved day is what the sign shows ----
   const dayState = `(() => { const now = new Date(); const pad = n => String(n).padStart(2, '0'); const raw = localStorage.getItem('webapp.winner'); let saved = null; try { saved = JSON.parse(raw); } catch {}
-    return { raw, saved, today: now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()), todayText: new Intl.DateTimeFormat('sl', { weekday: 'short', day: 'numeric', month: 'short' }).format(now),
+    return { raw, saved, today: now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()), todayText: new Intl.DateTimeFormat('sl', { weekday: 'long', day: 'numeric', month: 'long' }).format(now),
       date: $('#result-date').textContent, dateHeight: $('#result-date').getBoundingClientRect().height, sign: sign(), whole: $('#result').hidden ? null : $('#result').innerText }; })()`;
   await ev(`localStorage.clear();`);
   await load();
@@ -518,7 +523,7 @@ try {
   check('sign shows that day right after the spin', fresh.date === fresh.todayText && fresh.dateHeight > 0, JSON.stringify(fresh));
 
   // Make the saved pick an older one. (March 2026: the 5th is a Thursday, the 6th a Friday.)
-  const [oldDay, oldText] = fresh.today === '2026-03-05' ? ['2026-03-06', 'pet., 6. mar.'] : ['2026-03-05', 'čet., 5. mar.'];
+  const [oldDay, oldText] = fresh.today === '2026-03-05' ? ['2026-03-06', 'petek, 6. marec'] : ['2026-03-05', 'četrtek, 5. marec'];
   await sv(`const saved = JSON.parse(localStorage.getItem('webapp.winner')); saved.day = '${oldDay}'; localStorage.setItem('webapp.winner', JSON.stringify(saved));`);
   await load();
   const older = await sv(`return ${dayState};`);
@@ -567,7 +572,7 @@ try {
   let cur = (await fastSpin()).tea;
   const other = ['A1', 'B2', 'C3'].find(t => t !== cur);
   await sv(`const id = JSON.parse(localStorage.getItem('webapp.strings')).find(i => i.text === ${JSON.stringify(other)}).id; localStorage.setItem('webapp.winner', JSON.stringify({ id, day: '2026-03-05' })); window.dispatchEvent(new StorageEvent('storage', { key: 'webapp.winner' }));`);
-  check('pick changed in another tab shows up here, with its saved day', await sv(`return sign() === 'Čaj dneva: ${other}' && $('#result-date').textContent === 'čet., 5. mar.';`), await sv(`return $('#result').textContent;`));
+  check('pick changed in another tab shows up here, with its saved day', await sv(`return sign() === 'Čaj dneva: ${other}' && $('#result-date').textContent === 'četrtek, 5. marec';`), await sv(`return $('#result').textContent;`));
   cur = other;
 
   // Shrink the list mid-spin so the slices resize under the wheel; the current tea must still never win.
@@ -687,7 +692,7 @@ try {
     $('#add-input').value = ''; $('#add-form').requestSubmit();
     return (seen + ' | ' + err()).match(/\\b(add|edit|delete|save|cancel|tea|teas|spin|wheel|string|strings|characters?|day|new|yet|enter|close|empty|button)\\b/gi);`);
   check('no English UI text remains', english === null, String(english));
-  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['Seznam čajev', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'ZAVRTI KOLOČAJ', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
+  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['Seznam čajev', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'ZAVRTI KOLOČAJ', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
 
   // ---- installable as an app, and usable without a connection ----
   await ev(`localStorage.clear();`);
