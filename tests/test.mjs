@@ -409,9 +409,9 @@ try {
   await sv(`['Earl Grey', 'Sencha', 'Rooibos', 'Oolong', 'Chai'].forEach(add);`);
   check('spin button: labelled, enabled, below the wheel; no sign yet', await sv(`return spinBtn.textContent === 'ZAVRTI KOLOČAJ' && !spinBtn.disabled && spinBtn.getBoundingClientRect().top >= $('#wheel svg').getBoundingClientRect().bottom && sign() === null;`));
   const glowA = await sv(`const cs = getComputedStyle(spinBtn), a = spinBtn.getAnimations()[0]; return { name: cs.animationName, endless: cs.animationIterationCount, seconds: parseFloat(cs.animationDuration), state: a && a.playState, bg: cs.backgroundColor };`);
-  await sleep(1500);
+  await sleep(500);
   const glowB = await sv(`return getComputedStyle(spinBtn).backgroundColor;`);
-  check('spin button: background shifts from colour to colour every few seconds, endlessly', glowA.name === 'glow' && glowA.endless === 'infinite' && glowA.seconds >= 3 && glowA.seconds <= 5 && glowA.state === 'running' && glowA.bg !== glowB, JSON.stringify(glowA) + ' -> ' + glowB);
+  check('spin button: background runs through its three colours every 1.5 seconds, endlessly', glowA.name === 'glow' && glowA.endless === 'infinite' && glowA.seconds === 1.5 && glowA.state === 'running' && glowA.bg !== glowB, JSON.stringify(glowA) + ' -> ' + glowB);
   // Waves: two faint copies of the button spread out from behind it now and then.
   const waves = await sv(`const all = spinBtn.getAnimations({ subtree: true }).filter(a => a.animationName === 'wave'); const by = p => all.find(a => a.effect.pseudoElement === p);
     const at = (p, ms) => { const a = by(p); a.pause(); a.currentTime = ms; const cs = getComputedStyle(spinBtn, p); const m = new DOMMatrix(cs.transform); const out = { opacity: +cs.opacity, sx: m.a, sy: m.d, bg: cs.backgroundColor }; a.play(); return out; };
