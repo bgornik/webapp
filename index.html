@@ -54,6 +54,20 @@
     }
     li .text { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
     li form { flex: 1; min-width: 0; }
+    #wheel svg { display: block; width: min(100%, 24rem); margin: 2rem auto 0; }
+    #wheel-spin {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: spin 40s linear infinite;
+    }
+    #wheel-spin path, #wheel-spin circle { stroke: #fff; stroke-width: 0.6; }
+    #wheel-spin text { fill: #fff; font-weight: 600; white-space: pre; }
+    #wheel .hub { fill: #fff; stroke: #1f2937; stroke-width: 1.5; }
+    #wheel .pointer { fill: #1f2937; stroke: #fff; stroke-width: 1; stroke-linejoin: round; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      #wheel-spin { animation: none; }
+    }
   </style>
 </head>
 <body>
@@ -66,6 +80,13 @@
     <p id="error" role="alert" hidden></p>
     <ul id="list"></ul>
     <p id="empty" hidden>No strings yet.</p>
+    <div id="wheel" hidden>
+      <svg viewBox="-100 -100 200 200" role="img" aria-label="Slowly spinning wheel with one section per string">
+        <g id="wheel-spin"></g>
+        <circle class="hub" r="7"/>
+        <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
+      </svg>
+    </div>
   </main>
   <script>
     // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
@@ -77,6 +98,17 @@
     const errorEl = document.getElementById('error');
     const listEl = document.getElementById('list');
     const emptyEl = document.getElementById('empty');
+    const wheelEl = document.getElementById('wheel');
+    const spinEl = document.getElementById('wheel-spin');
+
+    // Wheel geometry, in the SVG's own units (the viewBox is 200 wide, centred on 0,0).
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const WHEEL_RADIUS = 96;
+    const LABEL_OUTER = 92;
+    const LABEL_MAX_LENGTH = 78;
+    const LABEL_SIZE = 10;
+    // All dark enough for white label text.
+    const WHEEL_COLORS = ['#be123c', '#1d4ed8', '#047857', '#b45309', '#6d28d9', '#0e7490', '#a21caf', '#4d7c0f'];
 
     let items = load();
     let editingId = null;
@@ -177,9 +209,62 @@
       return li;
     }
 
+    function svgEl(name, attrs) {
+      const el = document.createElementNS(SVG_NS, name);
+      for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+      return el;
+    }
+
+    function sliceColor(index, count) {
+      // Stops the last slice matching the first one it wraps round to.
+      const wraps = count > 1 && index === count - 1 && index % WHEEL_COLORS.length === 0;
+      return WHEEL_COLORS[wraps ? 1 : index % WHEEL_COLORS.length];
+    }
+
+    // Only the contents of the spinning group are replaced, so the rotation never restarts.
+    function renderWheel() {
+      const count = items.length;
+      wheelEl.hidden = count === 0;
+      const step = 2 * Math.PI / count;
+      const point = angle => `${(WHEEL_RADIUS * Math.cos(angle)).toFixed(3)} ${(WHEEL_RADIUS * Math.sin(angle)).toFixed(3)}`;
+
+      const slices = [];
+      const labels = [];
+      items.forEach((item, index) => {
+        const start = index * step - Math.PI / 2; // the first slice starts at 12 o'clock
+        const fill = sliceColor(index, count);
+        slices.push(count === 1
+          ? svgEl('circle', { r: WHEEL_RADIUS, fill })
+          : svgEl('path', { fill, d: `M0 0L${point(start)}A${WHEEL_RADIUS} ${WHEEL_RADIUS} 0 0 1 ${point(start + step)}Z` }));
+
+        const label = svgEl('text', {
+          x: LABEL_OUTER,
+          'text-anchor': 'end',
+          'dominant-baseline': 'central',
+          'font-size': LABEL_SIZE,
+          transform: `rotate(${(start + step / 2) * 180 / Math.PI})`,
+        });
+        label.textContent = item.text;
+        labels.push(label);
+      });
+      spinEl.replaceChildren(...slices, ...labels);
+
+      // Shrink each label until it fits along the radius and inside its slice's width
+      // at the end nearest the hub, where the slice is narrowest.
+      const widthFactor = 2 * Math.sin(Math.PI / count) * 0.9;
+      for (const label of labels) {
+        const length = label.getComputedTextLength();
+        if (!length) continue;
+        let scale = Math.min(1, LABEL_MAX_LENGTH / length);
+        if (count > 2) scale = Math.min(scale, widthFactor * LABEL_OUTER / (LABEL_SIZE + widthFactor * length));
+        label.setAttribute('font-size', (LABEL_SIZE * scale).toFixed(2));
+      }
+    }
+
     function render() {
       listEl.replaceChildren(...items.map(renderItem));
       emptyEl.hidden = items.length > 0;
+      renderWheel();
       const editInput = listEl.querySelector('li form input');
       if (editInput) {
         editInput.focus();
