@@ -31,9 +31,13 @@ const chrome = spawn(process.env.CHROME || 'google-chrome', ['--headless=new', '
   `--user-data-dir=${profile}`, '--window-size=600,700', 'about:blank'], { stdio: 'ignore' });
 let chromeError = null;
 chrome.on('error', e => { chromeError = e; });
-const cleanup = () => {
+const cleanup = async () => {
   server.close();
-  chrome.kill();
+  if (chrome.exitCode === null && !chromeError) {
+    const exited = new Promise(r => chrome.once('exit', r));
+    chrome.kill();
+    await Promise.race([exited, sleep(5000)]);
+  }
   try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
 };
 
@@ -73,6 +77,12 @@ try {
     return res.result.result.value;
   };
   await send('Page.enable'); await send('Runtime.enable');
+  const clickAt = async (x, y) => {
+    for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+  };
+  const pressEscape = async () => {
+    for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  };
 
   const helpers = `
     const $ = s => document.querySelector(s);
@@ -82,6 +92,10 @@ try {
     const row = t => [...document.querySelectorAll('#list li')].find(li => li.querySelector('.text')?.textContent === t);
     const btn = (t, label) => [...row(t).querySelectorAll('button')].find(b => b.textContent === label);
     const err = () => $('#error').hidden ? '' : $('#error').textContent;
+    const dialog = $('#teas-dialog');
+    const shown = s => $(s).getClientRects().length > 0;
+    const middle = s => { $(s).scrollIntoView({ block: 'nearest' }); const r = $(s).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+    const editorParts = ['#teas-title', '#close-teas', '#add-form', '#add-input', '#list', '#empty'];
   `;
   const ev = expr => run(helpers + expr);
 
@@ -91,8 +105,31 @@ try {
 
   check('empty state shown on first load', await ev(`return !$('#empty').hidden && texts().length === 0;`));
   check('no teas: blank wheel shown, spin button disabled, no labels', await ev(`const g = $('#wheel-spin'); return g.querySelectorAll('circle.empty').length === 1 && g.querySelectorAll('path, text').length === 0 && $('#spin-button').disabled && $('#wheel svg').getBoundingClientRect().width > 200;`));
-  const order = await ev(`const top = s => $(s).getBoundingClientRect().top; return ['h1', '#wheel svg', '#spin-button', '#add-form', '#empty'].map(top);`);
-  check('layout: heading, wheel, spin button, then the add form and list', order.every((v, i) => i === 0 || v > order[i - 1]), order.join(','));
+  const order = await ev(`const top = s => $(s).getBoundingClientRect().top; return ['h1', '#wheel svg', '#spin-button', '#hint'].map(top);`);
+  check('landing: heading, wheel, spin button, then the empty-wheel hint', order.every((v, i) => i === 0 || v > order[i - 1]), order.join(','));
+  check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš z gumbom »Uredi čaje«.';`));
+  const head = await ev(`const mid = r => r.left + r.width / 2; const m = $('main').getBoundingClientRect(), range = document.createRange(); range.selectNodeContents($('h1'));
+    const text = range.getBoundingClientRect(), cat = $('.cat').getBoundingClientRect();
+    return { textOff: mid(text) - mid(m), catOff: mid(cat) - mid(m), weight: +getComputedStyle($('h1')).fontWeight, catAboveText: cat.bottom <= text.top + 12 && cat.top >= 0, catSize: cat.width, catHidden: $('.cat').getAttribute('aria-hidden') };`);
+  check('heading: "Izbirnik čaja" is centred and bold', Math.abs(head.textOff) < 1 && head.weight >= 700, JSON.stringify(head));
+  check('heading: a small cat sits centred on top of it, hidden from screen readers', Math.abs(head.catOff) < 1 && head.catAboveText && head.catSize >= 40 && head.catSize <= 64 && head.catHidden === 'true', JSON.stringify(head));
+  const wagA = await ev(`const tail = $('.cat-tail'), a = tail.getAnimations()[0], cs = getComputedStyle(tail); const body = $('.cat path.cat-fur');
+    return { name: cs.animationName, state: a && a.playState, endless: cs.animationIterationCount, seconds: parseFloat(cs.animationDuration), m: cs.transform, behindBody: !!(tail.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING), others: [...$('.cat').querySelectorAll('*')].filter(e => e !== tail && e.getAnimations().length).length };`);
+  await sleep(500);
+  const wagB = await ev(`return getComputedStyle($('.cat-tail')).transform;`);
+  check('cat: only the tail moves, slowly and endlessly, drawn behind the body', wagA.name === 'wag' && wagA.state === 'running' && wagA.endless === 'infinite' && wagA.seconds >= 1 && wagA.behindBody && wagA.others === 0 && wagA.m !== wagB, JSON.stringify(wagA) + ' -> ' + wagB);
+  const opener = await ev(`const mid = r => r.left + r.width / 2; const b = $('#edit-teas').getBoundingClientRect(); return { text: $('#edit-teas').textContent, belowHint: b.top >= $('#hint').getBoundingClientRect().bottom, off: mid(b) - mid($('main').getBoundingClientRect()) };`);
+  check('landing: "Uredi čaje" button sits centred below the wheel section', opener.text === 'Uredi čaje' && opener.belowHint && Math.abs(opener.off) < 1, JSON.stringify(opener));
+  check('landing: tea editor is closed, none of it is shown', await ev(`return !dialog.open && editorParts.every(s => !shown(s)) && [...$('main').children].map(e => e.tagName + '#' + e.id).join() === 'HEADER#,DIV#wheel,BUTTON#edit-teas';`));
+
+  await clickAt(...await ev(`return middle('#edit-teas');`));
+  const opened = await ev(`return { open: dialog.open, modal: dialog.matches(':modal'), parts: editorParts.filter(s => s !== '#list').every(shown), title: $('#teas-title').textContent, labelled: dialog.getAttribute('aria-labelledby'), focusInside: dialog.contains(document.activeElement), focus: document.activeElement.id, pageLocked: getComputedStyle(document.documentElement).overflow };`);
+  check('editor: clicking the button opens a modal dialog titled "Čaji"', opened.open && opened.modal && opened.parts && opened.title === 'Čaji' && opened.labelled === 'teas-title', JSON.stringify(opened));
+  check('editor: focus moves into the dialog (not the text field, so a phone keyboard stays down)', opened.focusInside && opened.focus === 'close-teas', JSON.stringify(opened));
+  check('editor: page behind the dialog cannot scroll', opened.pageLocked === 'hidden', opened.pageLocked);
+  const place = await ev(`const d = dialog.getBoundingClientRect(), w = $('#wheel svg').getBoundingClientRect(); return { left: d.left, right: d.right, top: d.top, bottom: d.bottom, vw: innerWidth, vh: innerHeight, coversWheelTop: d.top < w.bottom };`);
+  check('editor: dialog fits inside the window', place.left >= 0 && place.right <= place.vw && place.top >= 0 && place.bottom <= place.vh, JSON.stringify(place));
+  // The create/update/delete checks below run with the editor open, as a person would use it.
   check('add input has maxlength 20', await ev(`return $('#add-input').maxLength === 20;`));
 
   await ev(`add('hello');`);
@@ -132,8 +169,29 @@ try {
   await ev(`btn('padded', 'Izbriši').click();`);
   check('delete: removed from list and storage', await ev(`return !texts().includes('padded') && !stored().includes('padded') && texts().length === 3;`));
 
+  check('editor: wheel behind the dialog already shows the teas', await ev(`return dialog.open && [...$('#wheel-spin').querySelectorAll('text')].map(t => t.textContent).join('|') === texts().join('|') && $('#hint').hidden;`));
+  await ev(`btn('hello world', 'Uredi').click();`);
+  await pressEscape();
+  check('editor: Escape while editing a tea cancels the edit, dialog stays open', await ev(`return dialog.open && !$('#list li form') && texts().includes('hello world');`));
+  await pressEscape();
+  check('editor: Escape again closes the dialog and returns focus to the button', await ev(`return !dialog.open && document.activeElement.id === 'edit-teas' && editorParts.every(s => !shown(s)) && getComputedStyle(document.documentElement).overflow !== 'hidden';`));
+
+  await ev(`$('#edit-teas').click(); btn('hello world', 'Uredi').click(); add('   ');`);
+  const reopened = await ev(`return { open: dialog.open, editing: !!$('#list li form'), error: err() };`);
+  check('editor: reopened with an edit in progress and an error', reopened.open && reopened.editing && reopened.error !== '', JSON.stringify(reopened));
+  await clickAt(...await ev(`return middle('#close-teas');`));
+  check('editor: "Zapri" closes it', await ev(`return !dialog.open && $('#close-teas').textContent === 'Zapri';`));
+  await ev(`$('#edit-teas').click();`);
+  check('editor: reopening starts clean, with the edit abandoned and the error gone', await ev(`return dialog.open && !$('#list li form') && err() === '' && texts().includes('hello world');`));
+  await clickAt(...await ev(`return middle('#teas-title');`));
+  check('editor: clicking inside the dialog keeps it open', await ev(`return dialog.open;`));
+  const outside = await ev(`const d = dialog.getBoundingClientRect(); return [d.left / 2, d.top / 2, d.left, d.top];`);
+  await clickAt(outside[0], outside[1]);
+  check('editor: clicking the dimmed area outside closes it', await ev(`return !dialog.open;`), `clicked ${outside[0]},${outside[1]} dialog at ${outside[2]},${outside[3]}`);
+
   const before = JSON.stringify(await ev(`return texts();`));
   await load();
+  check('editor: closed again after a reload', await ev(`return !dialog.open && editorParts.every(s => !shown(s));`));
   check('persistence: same items after reload', JSON.stringify(await ev(`return texts();`)) === before, before);
 
   await ev(`localStorage.setItem('webapp.strings', '{not json');`);
@@ -158,7 +216,7 @@ try {
   };
 
   check('wheel: one tea draws a full circle with its label', await wv(`return !$('#wheel').hidden && slices().length === 1 && slices()[0].tagName === 'circle' && labels().join() === 'recovered';`));
-  check('layout: add form and list sit below the whole wheel section', await wv(`return $('#add-form').getBoundingClientRect().top >= $('#wheel').getBoundingClientRect().bottom && $('#list').getBoundingClientRect().top >= $('#add-form').getBoundingClientRect().bottom;`));
+  check('landing: with teas, the hint is gone and the page is still just heading, wheel and button', await wv(`return !shown('#hint') && !dialog.open && editorParts.every(s => !shown(s)) && shown('#wheel svg') && shown('#spin-button');`));
 
   const animBefore = await wv(`const a = spin.getAnimations()[0]; window.__anim = a; return { state: a.playState, duration: a.effect.getTiming().duration, iterations: a.effect.getTiming().iterations === Infinity, t: a.currentTime, m: getComputedStyle(spin).transform };`);
   check('wheel: spin animation running, 40s per turn, endless', animBefore.state === 'running' && animBefore.duration === 40000 && animBefore.iterations, JSON.stringify(animBefore));
@@ -209,7 +267,8 @@ try {
   // ---- spin button, landing, sign, confetti ----
   const spinHelpers = `
     const spinBtn = $('#spin-button');
-    const sign = () => $('#result').hidden ? null : $('#result').textContent;
+    // The sign reads "Čaj dneva (pon., 12. okt.): SENCHA"; the date is checked separately and dropped here.
+    const sign = () => $('#result').hidden ? null : $('#result').textContent.replace(/ \\([^)]*\\)/, '');
     // Rendered rotation, read back from the browser rather than from the app's own state.
     const shownAngle = () => { const m = new DOMMatrix(getComputedStyle(spin).transform); return Math.atan2(m.b, m.a) * 180 / Math.PI; };
     // Which label points straight up at the pointer, and how far off-centre it is.
@@ -250,7 +309,11 @@ try {
   await sleep(6300);
   const landed = await sv(`return state();`);
   check('land: sign names the tea under the pointer, slice highlighted, button re-enabled', landedOk(landed), JSON.stringify(landed));
-  check('layout: sign appears between the spin button and the add form', await sv(`const r = $('#result').getBoundingClientRect(); return r.top >= spinBtn.getBoundingClientRect().bottom && r.bottom <= $('#add-form').getBoundingClientRect().top;`));
+  check('landing: sign appears below the spin button, tea editor stays closed', await sv(`const r = $('#result').getBoundingClientRect(); return r.top >= spinBtn.getBoundingClientRect().bottom && !dialog.open && editorParts.every(s => !shown(s));`));
+  const dated = await sv(`const now = new Date();
+    const expected = '(' + ['ned.', 'pon.', 'tor.', 'sre.', 'čet.', 'pet.', 'sob.'][now.getDay()] + ', ' + now.getDate() + '. ' + ['jan.', 'feb.', 'mar.', 'apr.', 'maj', 'jun.', 'jul.', 'avg.', 'sep.', 'okt.', 'nov.', 'dec.'][now.getMonth()] + ')';
+    return { expected, date: $('#result-date').textContent, full: $('#result').textContent, smaller: parseFloat(getComputedStyle($('#result-date')).fontSize) < parseFloat(getComputedStyle($('#result')).fontSize) };`);
+  check('sign: carries today\'s date, abbreviated, with the weekday, in Slovenian', dated.date === dated.expected && dated.full.startsWith(`Čaj dneva ${dated.expected}: `) && dated.smaller, JSON.stringify(dated));
   check('land: wheel is at rest on the winner', landed.anims === 0, JSON.stringify(landed));
   check('land: confetti canvas appears', landed.confetti === 1);
   check('land: sign is big and in view', await sv(`const r = $('#result').getBoundingClientRect(); return parseFloat(getComputedStyle($('#result')).fontSize) >= 24 && r.top >= 0;`));
@@ -306,9 +369,9 @@ try {
   // Uppercase sign, original case everywhere else (list is down to one tea here).
   await sv(`btn(texts()[0], 'Uredi').click(); const i = $('#list li form input'); i.value = 'žajbelj Čaj šipek'; i.closest('form').requestSubmit();`);
   const up = await sv(`return { sign: sign(), shown: $('#result').innerText, list: texts(), wheel: labels(), stored: stored() };`);
-  check('sign shows the tea in uppercase, including č/š/ž', up.sign === 'Čaj dneva: ŽAJBELJ ČAJ ŠIPEK' && up.shown === 'Čaj dneva:\nŽAJBELJ ČAJ ŠIPEK', JSON.stringify(up));
-  const lines = await sv(`const range = document.createRange(); range.selectNodeContents($('#result').firstChild); const label = range.getBoundingClientRect(); const name = $('#result-name').getBoundingClientRect(); const box = $('#result').getBoundingClientRect(); return { labelText: $('#result').firstChild.textContent.trim(), labelBottom: label.bottom, nameTop: name.top, labelMid: label.left + label.width / 2, nameMid: name.left + name.width / 2, boxMid: box.left + box.width / 2, nameInside: name.bottom <= box.bottom, nameLines: Math.round(name.height / parseFloat(getComputedStyle($('#result')).lineHeight)) };`);
-  check('sign: "Čaj dneva:" on its own line, tea on the next line, both centred', lines.labelText === 'Čaj dneva:' && lines.nameTop >= lines.labelBottom - 4 && lines.nameLines === 1 && Math.abs(lines.labelMid - lines.boxMid) < 2 && Math.abs(lines.nameMid - lines.boxMid) < 2 && lines.nameInside, JSON.stringify(lines));
+  check('sign shows the tea in uppercase, including č/š/ž', up.sign === 'Čaj dneva: ŽAJBELJ ČAJ ŠIPEK' && up.shown.replace(/ \([^)]*\)/, '') === 'Čaj dneva:\nŽAJBELJ ČAJ ŠIPEK', JSON.stringify(up));
+  const lines = await sv(`const range = document.createRange(); range.setStart($('#result'), 0); range.setEndBefore($('#result-name')); const label = range.getBoundingClientRect(); const name = $('#result-name').getBoundingClientRect(); const box = $('#result').getBoundingClientRect(); return { labelText: range.toString().trim().replace(/ \\([^)]*\\)/, ''), labelLines: range.getClientRects().length, labelBottom: label.bottom, nameTop: name.top, labelMid: label.left + label.width / 2, nameMid: name.left + name.width / 2, boxMid: box.left + box.width / 2, nameInside: name.bottom <= box.bottom, nameLines: Math.round(name.height / parseFloat(getComputedStyle($('#result')).lineHeight)) };`);
+  check('sign: "Čaj dneva (date):" on its own line, tea on the next line, both centred', lines.labelText === 'Čaj dneva:' && lines.nameTop >= lines.labelBottom - 4 && lines.nameLines === 1 && Math.abs(lines.labelMid - lines.boxMid) < 2 && Math.abs(lines.nameMid - lines.boxMid) < 2 && lines.nameInside, JSON.stringify(lines));
   check('list, wheel label and saved data keep the original case', [up.list, up.wheel, up.stored].every(a => a.length === 1 && a[0] === 'žajbelj Čaj šipek'), JSON.stringify(up));
   await sv(`btn('žajbelj Čaj šipek', 'Uredi').click(); const i = $('#list li form input'); i.value = 'ALREADY UPPER 123'; i.closest('form').requestSubmit();`);
   check('an already-uppercase tea is unchanged on the sign', await sv(`return sign() === 'Čaj dneva: ALREADY UPPER 123';`), await sv(`return sign();`));
@@ -405,6 +468,19 @@ try {
   await load();
   await sv(`['Zeleni', 'Črni', 'Meta', 'Kamilica', 'Šipek'].forEach(add);`);
   check('phone: wheel fits the screen width and idles', await sv(`const r = $('#wheel svg').getBoundingClientRect(); return r.width > 250 && r.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth && spin.getAnimations().length === 1;`));
+  const tap = async (x, y) => {
+    for (const type of ['touchStart', 'touchEnd']) await send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchStart' ? [{ x, y }] : [] });
+    await sleep(300);
+  };
+  check('phone: cat, heading, wheel, spin button and "Uredi čaje" all fit on the first screen', await sv(`return scrollY === 0 && $('#edit-teas').getBoundingClientRect().bottom <= innerHeight && $('.cat').getBoundingClientRect().top >= 0 && spinBtn.getBoundingClientRect().bottom <= $('#edit-teas').getBoundingClientRect().top;`));
+  await tap(...await sv(`return middle('#edit-teas');`));
+  const sheet = await sv(`const d = dialog.getBoundingClientRect(), i = $('#add-input').getBoundingClientRect(); return { open: dialog.open, left: d.left, right: d.right, top: d.top, bottom: d.bottom, vw: innerWidth, vh: innerHeight, inputBottom: i.bottom, rows: document.querySelectorAll('#list li').length, rowsShown: [...document.querySelectorAll('#list li')].every(li => li.getBoundingClientRect().bottom <= d.bottom) };`);
+  check('phone: tapping "Uredi čaje" opens the editor, inside the screen', sheet.open && sheet.left >= 0 && sheet.right <= sheet.vw && sheet.top >= 0 && sheet.bottom <= sheet.vh && sheet.rows === 5, JSON.stringify(sheet));
+  check('phone: add field sits in the top half, clear of an on-screen keyboard', sheet.inputBottom < sheet.vh / 2, JSON.stringify(sheet));
+  const shotE = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(scratch, 'phone-editor.png'), Buffer.from(shotE.result.data, 'base64'));
+  await tap(...await sv(`return middle('#close-teas');`));
+  check('phone: tapping "Zapri" closes the editor', await sv(`return !dialog.open;`));
   const box = await sv(`spinBtn.scrollIntoView({ block: 'center' }); const r = spinBtn.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2];`);
   for (const type of ['touchStart', 'touchEnd']) await send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchStart' ? [{ x: box[0], y: box[1] }] : [] });
   await sleep(300);
@@ -417,9 +493,33 @@ try {
   writeFileSync(join(scratch, 'phone.png'), Buffer.from(shotP.result.data, 'base64'));
   await sleep(1200);
   const signBox = await sv(`const r = $('#result').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, vh: innerHeight };`);
+  const phoneSign = await sv(`const range = document.createRange(); range.setStart($('#result'), 0); range.setEndBefore($('#result-name')); const tops = new Set([...range.getClientRects()].map(r => Math.round(r.bottom))); return { label: range.toString(), labelRows: tops.size, editBelow: $('#edit-teas').getBoundingClientRect().top >= $('#result').getBoundingClientRect().bottom, allOnScreen: $('#edit-teas').getBoundingClientRect().bottom <= innerHeight + scrollY };`);
+  check('phone: "Čaj dneva (date):" fits on one line; edit button below the sign', phoneSign.labelRows <= 2 && phoneSign.editBelow, JSON.stringify(phoneSign));
   check('phone: sign ends up fully on screen', signBox.top >= 0 && signBox.bottom <= signBox.vh + 0.5, JSON.stringify(signBox));
   const shotQ = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(scratch, 'phone-settled.png'), Buffer.from(shotQ.result.data, 'base64'));
+  await send('Emulation.setEmulatedMedia', { features: [] });
+
+  // The wheel's rim must stand out from the page behind it in both light and dark themes.
+  const luminance = `c => { const [r, g, b] = c.match(/[\\d.]+/g).slice(0, 3).map(v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; }`;
+  for (const scheme of ['light', 'dark']) {
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+    await ev(`localStorage.clear();`);
+    await load();
+    await ev(`['Zeleni', 'Črni', 'Meta', 'Kamilica'].forEach(add); window.scrollTo(0, 0);`);
+    const rimColour = await ev(`const lum = ${luminance}; const probe = document.createElement('div'); probe.style.background = 'Canvas'; document.body.append(probe);
+      const page = getComputedStyle(probe).backgroundColor; probe.remove(); const rim = getComputedStyle($('#wheel .rim')).stroke;
+      const a = lum(rim), b = lum(page); const [r, g, bl] = rim.match(/[\\d.]+/g).map(Number);
+      return { scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', rim, page, contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), colourful: Math.max(r, g, bl) - Math.min(r, g, bl) > 80 };`);
+    check(`wheel rim (${scheme} theme): a real colour that contrasts with the page background`, rimColour.scheme === scheme && rimColour.rim !== rimColour.page && rimColour.contrast >= 3 && rimColour.colourful, JSON.stringify(rimColour));
+    const shotT = await send('Page.captureScreenshot', { format: 'png' });
+    writeFileSync(join(scratch, `landing-${scheme}.png`), Buffer.from(shotT.result.data, 'base64'));
+    if (scheme === 'dark') {
+      await ev(`$('#edit-teas').click();`);
+      const shotD = await send('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(join(scratch, 'editor-dark.png'), Buffer.from(shotD.result.data, 'base64'));
+    }
+  }
   await send('Emulation.setEmulatedMedia', { features: [] });
 
   // No English left anywhere a person can see or a screen reader can read.
@@ -427,13 +527,13 @@ try {
   await load();
   await ev(`add('Meta'); add('Zeleni'); $('#spin-button').click(); document.getElementById('wheel-spin').getAnimations()[0].finish();`);
   await sleep(25);
-  await ev(`btn('Meta', 'Uredi').click();`);
+  await ev(`$('#edit-teas').click(); btn('Meta', 'Uredi').click();`);
   const english = await ev(`
-    const seen = [document.title, document.body.innerText, ...[...document.querySelectorAll('[placeholder], [aria-label]')].flatMap(e => [e.getAttribute('placeholder'), e.getAttribute('aria-label')])].join(' | ');
+    const seen = [document.title, document.body.innerText, $('#hint').textContent, ...[...document.querySelectorAll('[placeholder], [aria-label]')].flatMap(e => [e.getAttribute('placeholder'), e.getAttribute('aria-label')])].join(' | ');
     $('#add-input').value = ''; $('#add-form').requestSubmit();
-    return (seen + ' | ' + err()).match(/\\b(add|edit|delete|save|cancel|tea|teas|spin|wheel|string|strings|characters?|day|new|yet|enter)\\b/gi);`);
+    return (seen + ' | ' + err()).match(/\\b(add|edit|delete|save|cancel|tea|teas|spin|wheel|string|strings|characters?|day|new|yet|enter|close|empty|button)\\b/gi);`);
   check('no English UI text remains', english === null, String(english));
-  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['Izbirnik čaja', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
+  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['Izbirnik čaja', 'Uredi čaje', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva (', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
 
   check('no uncaught page errors', errors.length === 0, errors.join('; '));
   ws.close();
@@ -441,7 +541,7 @@ try {
   failures++;
   console.log('ERROR', e.stack || e);
 } finally {
-  cleanup();
+  await cleanup();
 }
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 console.log(`Screenshots: ${scratch}`);
