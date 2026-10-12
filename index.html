@@ -39,8 +39,8 @@
       font: 1rem/1.5 system-ui, sans-serif;
     }
     main { position: relative; max-width: 32rem; margin: 0 auto; }
-    /* Kebab menu in the top left corner; its list drops down below the three dots. */
-    #menu-wrap { position: absolute; top: -0.75rem; left: -0.5rem; z-index: 5; }
+    /* Kebab menu in the top right corner; its list drops down below the three dots. */
+    #menu-wrap { position: absolute; top: -0.75rem; right: -0.5rem; z-index: 5; }
     #menu-button {
       display: grid;
       place-items: center;
@@ -57,7 +57,7 @@
     #menu {
       position: absolute;
       top: 100%;
-      left: 0;
+      right: 0;
       min-width: 11rem;
       margin-top: 0.25rem;
       padding: 0.3rem;
@@ -250,7 +250,7 @@
         <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
       </svg>
       <button id="spin-button" type="button" class="primary">ZAVRTI KOLOČAJ</button>
-      <p id="hint" hidden>Kolo je prazno. Čaje dodaš v meniju ⋮ zgoraj levo.</p>
+      <p id="hint" hidden>Kolo je prazno. Čaje dodaš v meniju ⋮ zgoraj desno.</p>
       <p id="result" role="status" hidden><span id="result-date"></span> Čaj dneva: <strong id="result-name"></strong></p>
     </div>
   </main>
