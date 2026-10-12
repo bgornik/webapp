@@ -132,12 +132,11 @@
       font-weight: 700;
       line-height: 1.25;
       overflow-wrap: anywhere;
-      animation: pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
     }
     /* Three lines: the date, "Čaj dneva:", then the tea. */
     #result-date { display: block; font-size: 0.6em; }
     #result strong { display: block; }
-    @keyframes pop { from { transform: scale(0.6); opacity: 0; } }
+    #result.waiting { visibility: hidden; }
     /* The tea list lives in a dialog pinned near the top of the window, so its add field stays
        clear of a phone's on-screen keyboard. The title and add field stay put while the list scrolls. */
     dialog {
@@ -464,9 +463,13 @@
         label.setAttribute('font-size', (LABEL_SIZE * scale).toFixed(2));
       }
 
-      const winner = items.find(item => item.id === winnerId);
       spinButton.disabled = spinning || count === 0;
       hintEl.hidden = count > 0;
+      // During a spin the previous sign is blanked but keeps its place and size, so the button
+      // below it does not jump up and back down.
+      resultEl.classList.toggle('waiting', spinning);
+      if (spinning) return;
+      const winner = items.find(item => item.id === winnerId);
       resultEl.hidden = !winner;
       // The sign shouts the name; the stored tea and its wheel label keep their own case.
       resultNameEl.textContent = winner ? signName(winner) : '';
@@ -523,7 +526,7 @@
       const current = items.find(item => item.id === winnerId);
       avoidName = current ? signName(current) : null;
       spinning = true;
-      winnerId = null; // hides the sign for the spin; the saved pick is only replaced on landing
+      winnerId = null; // drops the highlight for the spin; the saved pick is only replaced on landing
       renderWheel();
 
       // Pick any tea but the current one, then a spot inside its slice (away from the edges).
@@ -556,8 +559,12 @@
       saveWinner();
       renderWheel();
       if (winner) {
+        resultEl.animate(
+          [{ transform: 'scale(0.6)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }],
+          { duration: 500, easing: 'cubic-bezier(0.2, 1.4, 0.4, 1)' },
+        );
         celebrate();
-        // Measured on the container: the sign itself is still mid pop-in and reports a smaller box.
+        // Measured on the container: the sign itself is mid pop-in and reports a smaller box.
         if (wheelEl.getBoundingClientRect().bottom > window.innerHeight) {
           wheelEl.scrollIntoView({ block: 'end', behavior: 'smooth' });
         }

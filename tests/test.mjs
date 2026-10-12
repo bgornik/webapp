@@ -300,7 +300,7 @@ try {
   const spinHelpers = `
     const spinBtn = $('#spin-button');
     // The sign reads "pon., 12. okt." / "Čaj dneva:" / "SENCHA"; the date is checked separately and dropped here.
-    const sign = () => $('#result').hidden ? null : $('#result').textContent.replace($('#result-date').textContent, '').trim();
+    const sign = () => ($('#result').hidden || getComputedStyle($('#result')).visibility === 'hidden') ? null : $('#result').textContent.replace($('#result-date').textContent, '').trim();
     // Rendered rotation, read back from the browser rather than from the app's own state.
     const shownAngle = () => { const m = new DOMMatrix(getComputedStyle(spin).transform); return Math.atan2(m.b, m.a) * 180 / Math.PI; };
     // Which label points straight up at the pointer, and how far off-centre it is.
@@ -422,11 +422,30 @@ try {
   check('nothing saved before the first spin', await sv(`return localStorage.getItem('webapp.winner') === null && sign() === null;`));
   const first = await fastSpin();
   check('pick is saved in localStorage', (await sv(`return ${savedPick};`)) === first.tea, first.tea);
+
+  // Spinning again must not move what sits below the sign. Positions are page positions, so scrolling does not matter.
+  const layout = `(() => { const y = el => Math.round((el.getBoundingClientRect().top + scrollY) * 10) / 10; const r = $('#result'), cs = getComputedStyle(r);
+    return { listButton: y($('#edit-teas')), signTop: y(r), signHeight: Math.round(r.offsetHeight * 10) / 10, absent: r.hidden, visibility: cs.visibility, sign: sign(), popping: r.getAnimations().length, text: r.textContent }; })()`;
+  const atRest = await sv(`return ${layout};`);
+  await sv(`spinBtn.click();`);
+  const whileSpinning = await sv(`return ${layout};`);
+  check('while spinning: the old sign is blanked but keeps its place and size', !whileSpinning.absent && whileSpinning.visibility === 'hidden' && whileSpinning.sign === null && whileSpinning.signTop === atRest.signTop && whileSpinning.signHeight === atRest.signHeight && whileSpinning.text === atRest.text, JSON.stringify([atRest, whileSpinning]));
+  check('while spinning: "Seznam čajev" stays exactly where it was', whileSpinning.listButton === atRest.listButton, `${atRest.listButton} -> ${whileSpinning.listButton}`);
+  await sleep(700);
+  const midSpin = await sv(`return ${layout};`);
+  check('mid-spin: still in the same place', midSpin.listButton === atRest.listButton && midSpin.visibility === 'hidden', JSON.stringify(midSpin));
+  await sv(`spin.getAnimations()[0].finish();`);
+  await settle();
+  const afterLanding = await sv(`return ${layout};`);
+  const landedTea = (await sv(`return state();`)).tea;
+  check('after landing: the sign is back with the new tea and a pop-in', afterLanding.visibility === 'visible' && afterLanding.sign !== null && afterLanding.sign !== atRest.sign && afterLanding.popping === 1, JSON.stringify(afterLanding));
+  check('after landing: "Seznam čajev" has still not moved', afterLanding.listButton === atRest.listButton && afterLanding.signHeight === atRest.signHeight, `${atRest.listButton} -> ${afterLanding.listButton}`);
+
   await load();
   const back = await sv(`return { sign: sign(), winners: spin.querySelectorAll('.winner').length, canvases: document.querySelectorAll('canvas').length, idle: spin.getAnimations()[0]?.effect.getTiming().duration, disabled: spinBtn.disabled };`);
-  check('reload: sign and highlight come back, wheel idles, no confetti replay', back.sign === `Čaj dneva: ${first.tea.toUpperCase()}` && back.winners === 1 && back.canvases === 0 && back.idle === 40000 && !back.disabled, JSON.stringify(back));
+  check('reload: sign and highlight come back, wheel idles, no confetti replay', back.sign === afterLanding.sign && back.winners === 1 && back.canvases === 0 && back.idle === 40000 && !back.disabled, JSON.stringify(back));
 
-  let prev = first.tea, repeats = '', wrong = '';
+  let prev = landedTea, repeats = '', wrong = '';
   const picked = new Set();
   for (let i = 0; i < 60; i++) {
     if (i % 12 === 0) await load(); // the rule must hold across reloads too, i.e. against the saved pick
@@ -541,7 +560,7 @@ try {
   const rm = await sv(`return state();`);
   check('reduced-motion device: lands on the winner with confetti', landedOk(rm) && rm.confetti === 1, JSON.stringify(rm));
   await sleep(400);
-  check('reduced-motion device: confetti is drawn, sign pops in', await sv(`const c = $('canvas.confetti'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n > 500 && getComputedStyle($('#result')).animationName === 'pop';`));
+  check('reduced-motion device: confetti is drawn', await sv(`const c = $('canvas.confetti'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n > 500;`));
   // Same again at an Android phone's viewport, pixel density and touch input, reduced motion still on.
   await send('Emulation.setDeviceMetricsOverride', { width: 412, height: 915, deviceScaleFactor: 2.625, mobile: true });
   await send('Emulation.setTouchEmulationEnabled', { enabled: true });
