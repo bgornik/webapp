@@ -124,7 +124,21 @@
       border-bottom: 1px solid var(--border);
     }
     li .text { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; white-space: pre-wrap; }
-    /* History rows: the tea, with the day it was chosen underneath. */
+    /* "Izbrišem?" beside the Da / Ne buttons, in a tea's row and under the history. */
+    .ask { color: var(--muted); white-space: nowrap; }
+    /* Pinned to the bottom of the dialog, so it is in reach however long the list above it is. */
+    #history-actions {
+      position: sticky;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      padding: 0.75rem 1.25rem 1rem;
+      background: Canvas;
+    }
+    #history-actions[hidden] { display: none; }
+    /* History rows: the tea, with the day and time it was chosen underneath. */
     #history-list li { display: block; }
     #history-list .when { display: block; color: var(--muted); font-size: 0.9rem; }
     #history-dialog .sheet-title { margin-bottom: 0; }
@@ -278,13 +292,14 @@
     </div>
     <ol id="history-list"></ol>
     <p id="history-empty" hidden>Noben čaj še ni bil izbran.</p>
+    <div id="history-actions" hidden></div>
   </dialog>
   <script>
     // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
     // It predates the rename to a tea picker and is kept so saved lists survive.
     const STORAGE_KEY = 'webapp.strings';
     const WINNER_KEY = 'webapp.winner'; // the current tea of the day and the day it was picked
-    const HISTORY_KEY = 'webapp.history'; // the last few picks, newest first, as [{ text, day }]
+    const HISTORY_KEY = 'webapp.history'; // the last few picks, newest first, as [{ text, day, time }]
     const HISTORY_LENGTH = 10;
     const SAVE_ERROR = 'Shranjevanje ni uspelo: shramba brskalnika ni na voljo ali je polna.';
     const MAX_LENGTH = 20;
@@ -300,6 +315,7 @@
     const historyDialog = document.getElementById('history-dialog');
     const historyListEl = document.getElementById('history-list');
     const historyEmptyEl = document.getElementById('history-empty');
+    const historyActionsEl = document.getElementById('history-actions');
     const hintEl = document.getElementById('hint');
     const wheelEl = document.getElementById('wheel');
     const spinEl = document.getElementById('wheel-spin');
@@ -330,6 +346,8 @@
 
     let items = load();
     let editingId = null;
+    let deletingId = null; // the tea whose row is asking "Izbrišem?"
+    let clearingHistory = false; // the history dialog is asking the same about the whole history
     let winnerId = null;
     let winnerDay = null; // the day it was picked, as YYYY-MM-DD; this is the date the sign shows
     loadWinner();
@@ -424,11 +442,50 @@
         text.textContent = pick.text;
         const when = document.createElement('span');
         when.className = 'when';
-        when.textContent = DATE_FORMAT.format(parseDay(pick.day));
+        // Picks saved before the time was recorded show the day alone.
+        const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(pick.time) ? ` ob ${pick.time}` : '';
+        when.textContent = DATE_FORMAT.format(parseDay(pick.day)) + time;
         li.append(text, when);
         return li;
       }));
       historyEmptyEl.hidden = picks.length > 0;
+
+      historyActionsEl.hidden = picks.length === 0;
+      if (!clearingHistory) {
+        historyActionsEl.replaceChildren(button('Izbriši zgodovino', 'danger', () => {
+          clearingHistory = true;
+          renderHistory();
+        }));
+        return;
+      }
+      const ask = document.createElement('span');
+      ask.className = 'ask';
+      ask.textContent = 'Izbrišem zgodovino?';
+      const keepButton = button('Ne', 'keep', keepHistory);
+      historyActionsEl.replaceChildren(ask, button('Da', 'danger', clearHistory), keepButton);
+      keepButton.focus();
+    }
+
+    function keepHistory() {
+      clearingHistory = false;
+      renderHistory();
+      historyActionsEl.querySelector('button').focus();
+    }
+
+    // Saved as an empty list (not removed), so the current pick is not put straight back in.
+    function clearHistory() {
+      picks = [];
+      clearingHistory = false;
+      saveHistory();
+      renderHistory();
+      historyDialog.querySelector('.sheet-title button').focus();
+    }
+
+    // The time on this device's clock, as HH:MM.
+    function clock() {
+      const now = new Date();
+      const pad = number => String(number).padStart(2, '0');
+      return `${pad(now.getHours())}:${pad(now.getMinutes())}`;
     }
 
     // Today on this device's calendar, as YYYY-MM-DD.
@@ -456,8 +513,14 @@
       errorEl.hidden = !message;
     }
 
+    // Two names are the same tea if they match once upper-cased and stripped of every space.
+    function teaKey(text) {
+      return text.toLocaleUpperCase('sl').replace(/\s+/g, '');
+    }
+
     // Returns the cleaned string, or null after showing why it was rejected.
-    function validate(raw) {
+    // ownId is the tea being renamed, which may of course keep its own name.
+    function validate(raw, ownId = null) {
       const text = raw.trim();
       if (!text) {
         showError('Vnesi vsaj en znak.');
@@ -465,6 +528,10 @@
       }
       if (text.length > MAX_LENGTH) {
         showError(`Ime čaja ima lahko največ ${MAX_LENGTH} znakov.`);
+        return null;
+      }
+      if (items.some(item => item.id !== ownId && teaKey(item.text) === teaKey(text))) {
+        showError('Ta čaj je že na seznamu.');
         return null;
       }
       showError('');
@@ -510,7 +577,7 @@
         form.append(input, saveButton, button('Prekliči', '', stopEditing));
         form.addEventListener('submit', event => {
           event.preventDefault();
-          const text = validate(input.value);
+          const text = validate(input.value, item.id);
           if (text === null) return;
           item.text = text;
           save();
@@ -523,10 +590,22 @@
       const text = document.createElement('span');
       text.className = 'text';
       text.textContent = item.text;
+      if (item.id === deletingId) {
+        const ask = document.createElement('span');
+        ask.className = 'ask';
+        ask.textContent = 'Izbrišem?';
+        li.append(text, ask, button('Da', 'danger', () => remove(item.id)), button('Ne', 'keep', stopEditing));
+        li.addEventListener('keydown', event => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault(); // answer "no"; otherwise Escape would also close the dialog
+          stopEditing();
+        });
+        return li;
+      }
       li.append(
         text,
         button('Uredi', '', () => startEditing(item.id)),
-        button('Izbriši', 'danger', () => remove(item.id)),
+        button('Izbriši', 'danger', () => askDelete(item.id)),
       );
       return li;
     }
@@ -692,7 +771,7 @@
       winnerDay = winner ? today() : null;
       saveWinner();
       if (winner) {
-        picks = [{ text: winner.text, day: winnerDay }, ...picks].slice(0, HISTORY_LENGTH);
+        picks = [{ text: winner.text, day: winnerDay, time: clock() }, ...picks].slice(0, HISTORY_LENGTH);
         saveHistory();
         renderHistory();
       }
@@ -781,16 +860,29 @@
         editInput.focus();
         editInput.select();
       }
+      // "Ne" gets the focus, so a stray Enter keeps the tea.
+      const keepButton = listEl.querySelector('li button.keep');
+      if (keepButton) keepButton.focus();
     }
 
     function startEditing(id) {
       editingId = id;
+      deletingId = null;
       showError('');
       render();
     }
 
+    function askDelete(id) {
+      editingId = null;
+      deletingId = id;
+      showError('');
+      render();
+    }
+
+    // Puts every row back to normal: no edit in progress, no question pending.
     function stopEditing() {
       editingId = null;
+      deletingId = null;
       showError('');
       render();
     }
@@ -798,6 +890,7 @@
     function remove(id) {
       items = items.filter(item => item.id !== id);
       if (editingId === id) editingId = null;
+      if (deletingId === id) deletingId = null;
       if (winnerId === id) {
         winnerId = null;
         winnerDay = null;
@@ -826,6 +919,7 @@
       picks = loadHistory();
       renderHistory();
       if (!items.some(item => item.id === editingId)) editingId = null;
+      if (!items.some(item => item.id === deletingId)) deletingId = null;
       render();
     });
 
@@ -866,8 +960,14 @@
     document.getElementById('open-history').addEventListener('click', () => {
       setMenuOpen(false);
       menuButton.focus();
+      clearingHistory = false;
       renderHistory();
       historyDialog.showModal();
+    });
+    historyActionsEl.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !clearingHistory) return;
+      event.preventDefault(); // answer "no"; otherwise Escape would also close the dialog
+      keepHistory();
     });
 
     for (const dialog of [teasDialog, historyDialog]) {

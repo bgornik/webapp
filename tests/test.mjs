@@ -113,6 +113,7 @@ try {
     const add = v => { $('#add-input').value = v; $('#add-form').requestSubmit(); };
     const row = t => [...document.querySelectorAll('#list li')].find(li => li.querySelector('.text')?.textContent === t);
     const btn = (t, label) => [...row(t).querySelectorAll('button')].find(b => b.textContent === label);
+    const del = t => { btn(t, 'Izbriši').click(); btn(t, 'Da').click(); };
     const err = () => $('#error').hidden ? '' : $('#error').textContent;
     const dialog = $('#teas-dialog');
     const shown = s => $(s).getClientRects().length > 0;
@@ -182,9 +183,9 @@ try {
   // History, before anything has ever been picked.
   await clickAt(...await ev(`return middle('#menu-button');`));
   await clickAt(...await ev(`return middle('#open-history');`));
-  const historyBlank = await ev(`const h = $('#history-dialog'); return { open: h.open, modal: h.matches(':modal'), title: $('#history-title').textContent, labelled: h.getAttribute('aria-labelledby'), rows: h.querySelectorAll('li').length, empty: shown('#history-empty') && $('#history-empty').textContent, menuClosed: !shown('#menu'), saved: localStorage.getItem('webapp.history'), close: $('#close-history').textContent };`);
+  const historyBlank = await ev(`const h = $('#history-dialog'); return { open: h.open, modal: h.matches(':modal'), title: $('#history-title').textContent, labelled: h.getAttribute('aria-labelledby'), rows: h.querySelectorAll('li').length, empty: shown('#history-empty') && $('#history-empty').textContent, clearShown: shown('#history-actions'), menuClosed: !shown('#menu'), saved: localStorage.getItem('webapp.history'), close: $('#close-history').textContent };`);
   check('history: the menu item opens a modal dialog titled "Zgodovina izbranih čajev"', historyBlank.open && historyBlank.modal && historyBlank.title === 'Zgodovina izbranih čajev' && historyBlank.labelled === 'history-title' && historyBlank.menuClosed && historyBlank.close === 'Zapri', JSON.stringify(historyBlank));
-  check('history: with nothing picked yet it says so, and nothing is saved', historyBlank.rows === 0 && historyBlank.empty === 'Noben čaj še ni bil izbran.' && historyBlank.saved === null, JSON.stringify(historyBlank));
+  check('history: with nothing picked yet it says so, offers nothing to clear, and nothing is saved', !historyBlank.clearShown && historyBlank.rows === 0 && historyBlank.empty === 'Noben čaj še ni bil izbran.' && historyBlank.saved === null, JSON.stringify(historyBlank));
   await pressEscape();
   check('history: Escape closes it and returns focus to the three dots', await ev(`return !$('#history-dialog').open && document.activeElement.id === 'menu-button';`));
 
@@ -235,8 +236,46 @@ try {
   await ev(`btn('padded', 'Uredi').click(); [...$('#list li form').querySelectorAll('button')].find(b => b.textContent === 'Prekliči').click();`);
   check('update: Cancel button exits edit mode', await ev(`return !$('#list li form') && texts().includes('padded');`));
 
+  // Deleting asks first.
+  const rowButtons = `li => [...li.querySelectorAll('button')].map(b => b.textContent).join()`;
   await ev(`btn('padded', 'Izbriši').click();`);
+  const asking = await ev(`const li = row('padded'), buttons = ${rowButtons}; return { still: texts().includes('padded') && stored().includes('padded'), ask: li.querySelector('.ask')?.textContent, buttons: buttons(li), focus: document.activeElement.textContent,
+    otherRows: [...document.querySelectorAll('#list li')].filter(l => l !== li).every(l => buttons(l) === 'Uredi,Izbriši'), oneLine: li.querySelector('.ask').getBoundingClientRect().height < 40 };`);
+  check('delete: asks "Izbrišem?" in the row first; nothing is removed yet and "Ne" has the focus', asking.still && asking.ask === 'Izbrišem?' && asking.buttons === 'Da,Ne' && asking.focus === 'Ne' && asking.otherRows && asking.oneLine, JSON.stringify(asking));
+  await ev(`btn('padded', 'Ne').click();`);
+  check('delete: "Ne" keeps the tea and puts its row back to normal', await ev(`return texts().includes('padded') && stored().includes('padded') && (${rowButtons})(row('padded')) === 'Uredi,Izbriši';`));
+  await ev(`btn('padded', 'Izbriši').click();`);
+  await pressEscape();
+  check('delete: Escape answers no, and the dialog stays open', await ev(`return dialog.open && texts().includes('padded') && stored().includes('padded') && !row('padded').querySelector('.ask');`));
+  await ev(`btn('padded', 'Izbriši').click(); btn('hello world', 'Izbriši').click();`);
+  check('delete: only one row asks at a time', await ev(`return document.querySelectorAll('#list .ask').length === 1 && !!row('hello world').querySelector('.ask') && texts().length === 4;`));
+  await ev(`btn('padded', 'Uredi').click();`);
+  check('delete: starting an edit withdraws the question', await ev(`return document.querySelectorAll('#list .ask').length === 0 && !!$('#list li form');`));
+  await ev(`[...$('#list li form').querySelectorAll('button')].find(b => b.textContent === 'Prekliči').click(); btn('padded', 'Izbriši').click(); dialog.close(); $('#edit-teas').click();`);
+  check('delete: reopening the list withdraws the question', await ev(`return dialog.open && document.querySelectorAll('#list .ask').length === 0 && texts().includes('padded') && stored().includes('padded');`));
+  await ev(`btn('padded', 'Izbriši').click(); btn('padded', 'Da').click();`);
   check('delete: removed from list and storage', await ev(`return !texts().includes('padded') && !stored().includes('padded') && texts().length === 3;`));
+
+  // No duplicates: names are compared upper-cased, with every space removed.
+  let dupes = '';
+  for (const name of ['hello world', 'HELLO WORLD', 'Hello  World', 'helloworld', ' h e l l o w o r l d ', '<B>BOLD</B>', '< b > bold < / b >']) {
+    await ev(`add(${JSON.stringify(name)});`);
+    const r = await ev(`return { count: texts().length, stored: stored().length, error: err(), typed: $('#add-input').value };`);
+    if (r.count !== 3 || r.stored !== 3 || r.error !== 'Ta čaj je že na seznamu.' || r.typed !== name) dupes += `${JSON.stringify(name)} -> ${JSON.stringify(r)}; `;
+  }
+  check('duplicates: a name already on the list is refused whatever its case or spacing, and what was typed is kept', dupes === '', dupes);
+  await ev(`add('Šipek čaj');`);
+  check('duplicates: a new name is still accepted, and clears the message', await ev(`return texts()[0] === 'Šipek čaj' && texts().length === 4 && err() === '';`));
+  await ev(`add('ŠIPEKČAJ');`);
+  const sumniki = await ev(`return { count: texts().length, error: err() };`);
+  await ev(`add('sipek caj');`);
+  check('duplicates: č and š are matched across case, but are not the same letters as c and s', sumniki.count === 4 && sumniki.error === 'Ta čaj je že na seznamu.' && await ev(`return texts()[0] === 'sipek caj' && texts().length === 5 && err() === '';`), JSON.stringify(sumniki));
+  await ev(`btn('sipek caj', 'Uredi').click(); const i = $('#list li form input'); i.value = 'HELLO  world'; i.closest('form').requestSubmit();`);
+  check('duplicates: renaming a tea to another tea\'s name is refused, and the edit stays open', await ev(`return err() === 'Ta čaj je že na seznamu.' && !!$('#list li form') && stored().includes('sipek caj') && stored().filter(t => /hello/i.test(t)).length === 1;`), await ev(`return err();`));
+  await ev(`const i = $('#list li form input'); i.value = 'SIPEK  CAJ'; i.closest('form').requestSubmit();`);
+  check('duplicates: a tea may be renamed to its own name in another case or spacing', await ev(`return err() === '' && !$('#list li form') && texts().includes('SIPEK  CAJ') && texts().length === 5;`), await ev(`return err() + ' ' + texts().join('|');`));
+  await ev(`del('SIPEK  CAJ'); del('Šipek čaj'); $('#add-input').value = '';`);
+  check('duplicates: test teas removed again', await ev(`return texts().length === 3 && stored().length === 3;`));
 
   check('editor: wheel behind the dialog already shows the teas', await ev(`return dialog.open && [...$('#wheel-spin').querySelectorAll('text')].map(t => t.textContent).join('|') === texts().join('|') && $('#hint').hidden;`));
   await ev(`btn('hello world', 'Uredi').click();`);
@@ -311,14 +350,15 @@ try {
       oldRim: !!$('#wheel .rim'), hubOff: Math.hypot(centre(svg)[0] - centre($('#wheel .hub'))[0], centre(svg)[1] - centre($('#wheel .hub'))[1]), pointerOverRim: $('#wheel .pointer').getBoundingClientRect().top < box.top + b };`);
   check('wheel: the rim is a solid round border, hugging the slices all the way round', new Set(rim.widths.split(',')).size === 1 && parseFloat(rim.widths) >= 4 && rim.style === 'solid' && rim.radius === '50%' && rim.round && Math.abs(rim.discRadius - 96) < 0.01 && rim.discCentred && [rim.gapLeft, rim.gapRight, rim.gapTop, rim.gapBottom].every(g => Math.abs(g) < 0.5) && !rim.oldRim && rim.hubOff < 0.5 && rim.pointerOverRim, JSON.stringify(rim));
   check('wheel: follows an edit', await wv(`return labels().includes('renamed') && !labels().includes('second item');`));
-  await wv(`btn('renamed', 'Izbriši').click();`);
+  await wv(`del('renamed');`);
   check('wheel: follows a delete', await wv(`return slices().length === 2 && !labels().includes('renamed');`));
 
   // Grow to 30 teas, checking colours and label fit at every size.
   const samples = ['WWWWWWWWWWWWWWWWWWWW', 'a', 'pizza night', 'iiiiiiiiiiiiiiiiiiii', 'Call the plumber!', 'x y z', 'supercalifragilistic', 'Tokyo'];
   let colourClash = '', overflow = '';
   for (let n = 3; n <= 30; n++) {
-    await wv(`add(${JSON.stringify(samples[n % samples.length])});`);
+    const sample = samples[n % samples.length]; // numbered, since the same name can no longer be added twice
+    await wv(`add(${JSON.stringify((sample.length > 17 ? sample.slice(0, 17) : sample) + ' ' + n)});`);
     const r = await wv(`
       const f = fills();
       const clash = f.some((c, i) => c === f[(i + 1) % f.length]);
@@ -461,14 +501,14 @@ try {
   check('80 spins: sign always matches the slice under the pointer', bad === '', bad.slice(0, 400));
   check('80 spins: the pick is random across all 5 teas', seen.size === 5, [...seen].join(','));
 
-  await sv(`spinBtn.click(); btn('Sencha', 'Izbriši').click(); btn('Chai', 'Izbriši').click(); spin.getAnimations()[0].finish();`);
+  await sv(`spinBtn.click(); del('Sencha'); del('Chai'); spin.getAnimations()[0].finish();`);
   await settle();
   const mid = await sv(`return state();`);
   check('list changed mid-spin: result still matches what is under the pointer', mid.sign === `Čaj dneva: ${mid.tea.toUpperCase()}` && mid.sliceIsWinner && mid.winners === 1 && mid.off < mid.half && !mid.disabled && !['Sencha', 'Chai'].includes(mid.tea), JSON.stringify(mid));
 
   await sv(`btn(${JSON.stringify(mid.tea)}, 'Uredi').click(); const i = $('#list li form input'); i.value = 'Renamed tea'; i.closest('form').requestSubmit();`);
   check('editing the winner updates the sign', await sv(`return sign() === 'Čaj dneva: RENAMED TEA';`), await sv(`return sign();`));
-  await sv(`btn('Renamed tea', 'Izbriši').click();`);
+  await sv(`del('Renamed tea');`);
   check('deleting the winner removes the sign', await sv(`return sign() === null && spin.querySelectorAll('.winner').length === 0;`));
 
   await sv(`while (document.querySelectorAll('#list li').length > 1) $('#list li button.danger').click(); spinBtn.click(); spin.getAnimations()[0].finish();`);
@@ -540,12 +580,12 @@ try {
   check('60 spins of 3 teas with reloads: never the current tea again', repeats === '', repeats);
   check('60 spins of 3 teas: landing, sign and saved pick always agree; all 3 come up', wrong === '' && picked.size === 3, wrong.slice(0, 300) + [...picked]);
 
-  await sv(`btn('Meta', 'Izbriši').click();`);
+  await sv(`del('Meta');`);
   const two = [];
   for (let i = 0; i < 8; i++) two.push((await fastSpin()).tea);
   check('2 teas: picks strictly alternate', two.every((t, i) => i === 0 || t !== two[i - 1]), two.join(','));
 
-  await sv(`btn(${JSON.stringify(two[7])}, 'Izbriši').click();`);
+  await sv(`del(${JSON.stringify(two[7])});`);
   check('deleting the picked tea clears the saved pick', await sv(`return localStorage.getItem('webapp.winner') === null && sign() === null;`));
   await load();
   check('reload after that: no sign', await sv(`return sign() === null && spin.querySelectorAll('.winner').length === 0;`));
@@ -570,7 +610,7 @@ try {
   await load();
   const older = await sv(`return ${dayState};`);
   check('reload: sign shows the saved day, not today', older.date === oldText && older.date !== older.todayText && older.sign === `Čaj dneva: ${dayPick.tea.toUpperCase()}` && older.whole === `${oldText}\nČaj dneva:\n${dayPick.tea.toUpperCase()}`, JSON.stringify(older));
-  await sv(`add('Kamilica'); btn('Kamilica', 'Uredi').click(); const i = $('#list li form input'); i.value = 'Lipa'; i.closest('form').requestSubmit(); btn('Lipa', 'Izbriši').click();`);
+  await sv(`add('Kamilica'); btn('Kamilica', 'Uredi').click(); const i = $('#list li form input'); i.value = 'Lipa'; i.closest('form').requestSubmit(); del('Lipa');`);
   const afterEdits = await sv(`return ${dayState};`);
   check('editing the list leaves the saved day alone', afterEdits.date === oldText && afterEdits.saved.day === oldDay, JSON.stringify(afterEdits));
   await sv(`spinBtn.click();`);
@@ -607,15 +647,16 @@ try {
   for (let i = 0; i < 3; i++) spun.unshift((await fastSpin()).tea);
   await sv(`$('#open-history').click();`);
   const h3 = await sv(`return { ...${historyState}, today: ${longDate}(new Date()) };`);
-  check('history: each landed spin is listed with its day, newest first', h3.open && h3.rows.join('|') === spun.map(t => `${t} @ ${h3.today}`).join('|'), JSON.stringify(h3.rows));
-  check('history: saved on the device as text and day', Array.isArray(h3.saved) && h3.saved.map(p => p.text).join('|') === spun.join('|') && h3.saved.every(p => /^\d{4}-\d{2}-\d{2}$/.test(p.day) && Object.keys(p).sort().join() === 'day,text'), JSON.stringify(h3.saved));
+  const nowClock = await sv(`const pad = n => String(n).padStart(2, '0'); const at = d => pad(d.getHours()) + ':' + pad(d.getMinutes()); return [at(new Date()), at(new Date(Date.now() - 60000))];`);
+  check('history: each landed spin is listed with its day and time, newest first', h3.open && h3.rows.length === 3 && h3.rows.every((r, i) => r.startsWith(`${spun[i]} @ ${h3.today} ob `) && /^\d{2}:\d{2}$/.test(r.slice(-5)) && r.slice(-5) === h3.saved[i].time && nowClock.includes(r.slice(-5))), JSON.stringify(h3.rows) + ' now ' + nowClock);
+  check('history: saved on the device as text, day and time', Array.isArray(h3.saved) && h3.saved.map(p => p.text).join('|') === spun.join('|') && h3.saved.every(p => /^\d{4}-\d{2}-\d{2}$/.test(p.day) && /^\d{2}:\d{2}$/.test(p.time) && Object.keys(p).sort().join() === 'day,text,time'), JSON.stringify(h3.saved));
   const historyLook = await sv(`const li = $('#history-list li'), t = li.querySelector('.text'), w = li.querySelector('.when'), d = $('#history-dialog').getBoundingClientRect(); return { bold: getComputedStyle(t).fontWeight, dateBelow: w.getBoundingClientRect().top >= t.getBoundingClientRect().bottom - 2, inside: d.left >= 0 && d.right <= innerWidth && d.bottom <= innerHeight, noButtons: $('#history-list').querySelectorAll('button, input').length };`);
   check('history: tea in bold with the day underneath; read-only; dialog fits the window', historyLook.bold === '700' && historyLook.dateBelow && historyLook.inside && historyLook.noButtons === 0, JSON.stringify(historyLook));
   await clickAt(...await sv(`return middle('#close-history');`));
   check('history: "Zapri" closes it', await sv(`return !$('#history-dialog').open;`));
 
   // Renaming or deleting a tea later must not rewrite what was picked at the time.
-  await sv(`btn(${JSON.stringify(spun[0])}, 'Uredi').click(); const i = $('#list li form input'); i.value = 'Preimenovan'; i.closest('form').requestSubmit(); btn(${JSON.stringify(spun[1])}, 'Izbriši').click(); $('#open-history').click();`);
+  await sv(`btn(${JSON.stringify(spun[0])}, 'Uredi').click(); const i = $('#list li form input'); i.value = 'Preimenovan'; i.closest('form').requestSubmit(); del(${JSON.stringify(spun[1])}); $('#open-history').click();`);
   const hKept = await sv(`return ${historyState};`);
   check('history: keeps the names as picked after a rename and a delete', hKept.rows.join('|') === h3.rows.join('|'), JSON.stringify(hKept.rows));
   await sv(`$('#history-dialog').close();`);
@@ -625,7 +666,7 @@ try {
   await load();
   await sv(`['Kamilica', 'Šipek', 'Lipa'].forEach(add); $('#open-history').click();`);
   const hOld = await sv(`return ${historyState};`);
-  check('history: survives a reload, and an older pick shows the day it was made', hOld.rows.length === 3 && hOld.rows[2] === `${spun[2]} @ četrtek, 5. marec` && hOld.rows.slice(0, 2).join('|') === h3.rows.slice(0, 2).join('|'), JSON.stringify(hOld.rows));
+  check('history: survives a reload, and an older pick shows the day it was made', hOld.rows.length === 3 && new RegExp(`^${spun[2]} @ četrtek, 5\\. marec ob \\d{2}:\\d{2}$`).test(hOld.rows[2]) && hOld.rows.slice(0, 2).join('|') === h3.rows.slice(0, 2).join('|'), JSON.stringify(hOld.rows));
   await sv(`$('#history-dialog').close();`);
   const more = [];
   for (let i = 0; i < 9; i++) more.unshift((await fastSpin()).tea);
@@ -642,7 +683,41 @@ try {
   // Another tab adding a pick; unusable saved data; and a device that has a pick from before the history existed.
   await sv(`const saved = JSON.parse(localStorage.getItem('webapp.history')); saved.unshift({ text: 'Iz drugega zavihka', day: '2026-03-06' }); localStorage.setItem('webapp.history', JSON.stringify(saved)); window.dispatchEvent(new StorageEvent('storage', { key: 'webapp.history' })); $('#open-history').click();`);
   const hTab = await sv(`return ${historyState};`);
-  check('history: a pick made in another tab appears here', hTab.rows[0] === 'Iz drugega zavihka @ petek, 6. marec' && hTab.rows.length === 10, JSON.stringify(hTab.rows.slice(0, 2)));
+  check('history: a pick made in another tab appears here (saved without a time, so shown with its day alone)', hTab.rows[0] === 'Iz drugega zavihka @ petek, 6. marec' && hTab.rows.length === 10, JSON.stringify(hTab.rows.slice(0, 2)));
+
+  // Clearing the history asks first, like deleting a tea.
+  const historyButtons = `(() => ({ shown: shown('#history-actions'), buttons: [...$('#history-actions').querySelectorAll('button')].map(b => b.textContent).join(), ask: $('#history-actions .ask')?.textContent ?? null, focus: document.activeElement.textContent, rows: $('#history-list').children.length, saved: JSON.parse(localStorage.getItem('webapp.history')).length, open: $('#history-dialog').open }))()`;
+  const hb = label => `[...$('#history-actions').querySelectorAll('button')].find(b => b.textContent === ${JSON.stringify(label)})`;
+  const clear0 = await sv(`const a = $('#history-actions').getBoundingClientRect(), l = $('#history-list').getBoundingClientRect(), d = $('#history-dialog').getBoundingClientRect(); return { ...${historyButtons}, below: a.top >= $('#history-list li').getBoundingClientRect().bottom - 1 && $('#history-actions').previousElementSibling.previousElementSibling.id === 'history-list', inside: a.bottom <= d.bottom + 0.5 && a.right <= d.right && a.bottom <= innerHeight, scrolls: $('#history-dialog').scrollHeight > $('#history-dialog').clientHeight };`);
+  check('history: an "Izbriši zgodovino" button sits under the list, in view without scrolling', clear0.shown && clear0.buttons === 'Izbriši zgodovino' && clear0.ask === null && clear0.below && clear0.inside, JSON.stringify(clear0));
+  await clickAt(...await sv(`const b = ${hb('Izbriši zgodovino')}; b.scrollIntoView({ block: 'nearest' }); const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2];`));
+  const clear1 = await sv(`return ${historyButtons};`);
+  check('history: clicking it asks "Izbrišem zgodovino?"; nothing is cleared yet and "Ne" has the focus', clear1.ask === 'Izbrišem zgodovino?' && clear1.buttons === 'Da,Ne' && clear1.focus === 'Ne' && clear1.rows === 10 && clear1.saved === clear0.saved, JSON.stringify(clear1));
+  await sv(`${hb('Ne')}.click();`);
+  const clear2 = await sv(`return ${historyButtons};`);
+  check('history: "Ne" keeps it', clear2.buttons === 'Izbriši zgodovino' && clear2.ask === null && clear2.focus === 'Izbriši zgodovino' && clear2.rows === 10 && clear2.saved === clear0.saved, JSON.stringify(clear2));
+  await sv(`${hb('Izbriši zgodovino')}.click();`);
+  await pressEscape();
+  const clear3 = await sv(`return ${historyButtons};`);
+  check('history: Escape answers no, and the dialog stays open', clear3.open && clear3.buttons === 'Izbriši zgodovino' && clear3.rows === 10 && clear3.saved === clear0.saved, JSON.stringify(clear3));
+  await sv(`${hb('Izbriši zgodovino')}.click(); $('#history-dialog').close(); $('#open-history').click();`);
+  const clear4 = await sv(`return ${historyButtons};`);
+  check('history: reopening the dialog withdraws the question', clear4.open && clear4.buttons === 'Izbriši zgodovino' && clear4.rows === 10, JSON.stringify(clear4));
+  const pickBefore = await sv(`return { sign: sign(), winner: localStorage.getItem('webapp.winner'), teas: localStorage.getItem('webapp.strings') };`);
+  await sv(`${hb('Izbriši zgodovino')}.click(); ${hb('Da')}.click();`);
+  const clear5 = await sv(`return { ...${historyButtons}, empty: shown('#history-empty'), raw: localStorage.getItem('webapp.history'), focusId: document.activeElement.id, sign: sign(), winner: localStorage.getItem('webapp.winner'), teas: localStorage.getItem('webapp.strings') };`);
+  check('history: "Da" clears it, on screen and on the device', clear5.open && clear5.rows === 0 && clear5.empty && !clear5.shown && clear5.raw === '[]' && clear5.focusId === 'close-history', JSON.stringify(clear5));
+  check('history: clearing leaves the tea of the day and the tea list alone', clear5.sign === pickBefore.sign && clear5.winner === pickBefore.winner && clear5.teas === pickBefore.teas && pickBefore.sign !== null, JSON.stringify(pickBefore));
+  await load();
+  await sv(`$('#open-history').click();`);
+  const clear6 = await sv(`return { rows: $('#history-list').children.length, empty: shown('#history-empty'), actions: shown('#history-actions'), sign: sign() };`);
+  check('history: still empty after a reload, although a tea of the day is showing', clear6.rows === 0 && clear6.empty && !clear6.actions && clear6.sign === pickBefore.sign, JSON.stringify(clear6));
+  const afterClear = await fastSpin();
+  const clear7 = await sv(`return [...$('#history-list').children].map(li => li.querySelector('.text').textContent);`);
+  check('history: the next spin starts it again', clear7.length === 1 && clear7[0] === afterClear.tea && await sv(`return shown('#history-actions');`), JSON.stringify(clear7));
+  await sv(`localStorage.setItem('webapp.history', JSON.stringify([{ text: 'Slab čas', day: '2026-03-05', time: '99:99' }, { text: 'Brez časa', day: '2026-03-06', time: 7 }])); window.dispatchEvent(new StorageEvent('storage', { key: 'webapp.history' }));`);
+  const badTime = await sv(`return [...document.querySelectorAll('#history-list li')].map(li => li.querySelector('.text').textContent + ' @ ' + li.querySelector('.when').textContent);`);
+  check('history: an unusable saved time is left out, the pick and its day still show', badTime.join('|') === 'Slab čas @ četrtek, 5. marec|Brez časa @ petek, 6. marec', JSON.stringify(badTime));
   for (const junk of ['{not json', '{"a":1}', '[{"text":"Brez dneva"},{"day":"2026-03-05"},{"text":"Slab dan","day":"2026-13-45"},null,7]']) {
     await sv(`localStorage.setItem('webapp.history', ${JSON.stringify(junk)});`);
     await load();
@@ -660,11 +735,13 @@ try {
   // Same tea written in different cases reads identically on the sign, so it counts as the same tea.
   await ev(`localStorage.clear();`);
   await load();
-  await sv(`['Meta', 'META', 'meta', 'Zeleni'].forEach(add);`);
+  // Such duplicates can no longer be added, but a list saved by an earlier version may hold them.
+  await sv(`localStorage.setItem('webapp.strings', JSON.stringify(['Zeleni', 'meta', 'META', 'Meta'].map((text, i) => ({ id: 'old' + i, text }))));`);
+  await load();
   const names = [];
   for (let i = 0; i < 20; i++) names.push((await fastSpin()).sign);
   check('same name in different cases is never picked back to back', names.every((n, i) => i === 0 || n !== names[i - 1]) && new Set(names).size === 2, names.slice(0, 6).join(' | '));
-  await sv(`btn('Zeleni', 'Izbriši').click();`);
+  await sv(`del('Zeleni');`);
   const allSame = await fastSpin();
   check('only same-named teas left: spin still completes', allSame.sign === 'Čaj dneva: META' && !allSame.disabled, JSON.stringify(allSame));
 
@@ -682,7 +759,7 @@ try {
   let nudged = 0, dodge = '';
   for (let i = 0; i < 40; i++) {
     const victim = ['A1', 'B2', 'C3'].filter(t => t !== cur)[i % 2];
-    const s = await fastSpin(`btn('${victim}', 'Izbriši').click();`);
+    const s = await fastSpin(`del('${victim}');`);
     nudged += s.nudges;
     if (s.tea === cur || s.tea === victim || s.sign !== `Čaj dneva: ${s.tea}` || !s.sliceIsWinner || s.off >= s.half || s.disabled) dodge += `try ${i} cur=${cur} victim=${victim}: ${JSON.stringify(s)} `;
     cur = s.tea;
