@@ -11,6 +11,7 @@
       --muted: #6b7280;
       --accent: #2563eb;
       --danger: #b91c1c;
+      --rim: #1f2937;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -18,6 +19,7 @@
         --muted: #9ca3af;
         --accent: #60a5fa;
         --danger: #f87171;
+        --rim: #e5e7eb;
       }
     }
     * { box-sizing: border-box; }
@@ -61,6 +63,7 @@
     #wheel-spin circle.empty { fill: var(--border); }
     #wheel-spin path.winner, #wheel-spin circle.winner { stroke: #facc15; stroke-width: 3; stroke-linejoin: round; }
     #wheel-spin text { fill: #fff; font-weight: 600; white-space: pre; }
+    #wheel .rim { fill: none; stroke: var(--rim); stroke-width: 4; }
     #wheel .hub { fill: #fff; stroke: #1f2937; stroke-width: 1.5; }
     #wheel .pointer { fill: #1f2937; stroke: #fff; stroke-width: 1; stroke-linejoin: round; }
     #spin-button { margin-top: 1.5rem; padding: 0.7rem 1.6rem; font-size: 1.15rem; font-weight: 600; }
@@ -78,6 +81,7 @@
       overflow-wrap: anywhere;
       animation: pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
     }
+    #result strong { display: block; } /* the tea goes on its own line under "Čaj dneva:" */
     @keyframes pop { from { transform: scale(0.6); opacity: 0; } }
     .confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
   </style>
@@ -87,6 +91,7 @@
     <h1>Izbirnik čaja</h1>
     <div id="wheel">
       <svg viewBox="-100 -100 200 200" role="img" aria-label="Vrteče se kolo z enim poljem za vsak čaj">
+        <circle class="rim" r="97.75"/>
         <g id="wheel-spin"></g>
         <circle class="hub" r="7"/>
         <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
@@ -106,6 +111,8 @@
     // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
     // It predates the rename to a tea picker and is kept so saved lists survive.
     const STORAGE_KEY = 'webapp.strings';
+    const WINNER_KEY = 'webapp.winner'; // id of the current tea of the day
+    const SAVE_ERROR = 'Shranjevanje ni uspelo: shramba brskalnika ni na voljo ali je polna.';
     const MAX_LENGTH = 20;
 
     const addForm = document.getElementById('add-form');
@@ -132,6 +139,7 @@
     const SPIN_MS = 6000;
     const SPIN_TURNS = 6;
     const SPIN_EASING = 'cubic-bezier(0.2, 0.4, 0.1, 1)';
+    const NUDGE_MS = 900;
     const HOLD_MS = 6000; // how long the wheel rests on the winner before idling again
     const CONFETTI_MS = 3500;
     const CONFETTI_COUNT = 180;
@@ -139,7 +147,8 @@
 
     let items = load();
     let editingId = null;
-    let winnerId = null;
+    let winnerId = loadWinner();
+    let avoidName = null; // while spinning: the current tea of the day, which must not win again
     let spinning = false;
     let wheelAngle = 0; // degrees clockwise, where the wheel rests when nothing is animating it
     let wheelAnimation = null;
@@ -159,8 +168,31 @@
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
       } catch {
-        showError('Shranjevanje ni uspelo: shramba brskalnika ni na voljo ali je polna.');
+        showError(SAVE_ERROR);
       }
+    }
+
+    function loadWinner() {
+      try {
+        const id = localStorage.getItem(WINNER_KEY);
+        return items.some(item => item.id === id) ? id : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function saveWinner() {
+      try {
+        if (winnerId) localStorage.setItem(WINNER_KEY, winnerId);
+        else localStorage.removeItem(WINNER_KEY);
+      } catch {
+        showError(SAVE_ERROR);
+      }
+    }
+
+    // How a tea reads on the sign. Two teas that read the same there count as the same tea.
+    function signName(item) {
+      return item.text.toLocaleUpperCase('sl');
     }
 
     function showError(message) {
@@ -307,7 +339,7 @@
       spinButton.disabled = spinning || count === 0;
       resultEl.hidden = !winner;
       // The sign shouts the name; the stored tea and its wheel label keep their own case.
-      resultNameEl.textContent = winner ? winner.text.toLocaleUpperCase('sl') : '';
+      resultNameEl.textContent = winner ? signName(winner) : '';
     }
 
     function setWheelAngle(angle) {
@@ -333,36 +365,61 @@
       setWheelAngle(wheelAngle + 360 * progress);
     }
 
+    function canWin(item) {
+      return signName(item) !== avoidName;
+    }
+
+    // The rotation, at or just past the current one, that puts a spot of the given slice under the pointer.
+    function angleToSlice(index, spot) {
+      const landing = (index + spot) * 360 / items.length;
+      return wheelAngle + ((360 - landing - wheelAngle) % 360 + 360) % 360;
+    }
+
+    // Turns the wheel clockwise to the given rotation, then settles the result.
+    function rotateTo(target, duration) {
+      wheelAnimation = spinEl.animate(
+        { transform: [`rotate(${wheelAngle}deg)`, `rotate(${target}deg)`] },
+        { duration, easing: SPIN_EASING, fill: 'forwards' },
+      );
+      wheelAnimation.onfinish = () => land(target);
+    }
+
     function spinWheel() {
       if (spinning || items.length === 0) return;
       stopIdle();
+      const current = items.find(item => item.id === winnerId);
+      avoidName = current ? signName(current) : null;
       spinning = true;
-      winnerId = null;
+      winnerId = null; // hides the sign for the spin; the saved pick is only replaced on landing
       renderWheel();
 
-      // Pick a slice, then a spot inside it (away from its edges) to bring under the pointer.
-      const step = 360 / items.length;
-      const index = Math.floor(Math.random() * items.length);
-      const landing = (index + 0.15 + Math.random() * 0.7) * step;
-      const target = wheelAngle + SPIN_TURNS * 360 + ((360 - landing - wheelAngle) % 360 + 360) % 360;
-
-      wheelAnimation = spinEl.animate(
-        { transform: [`rotate(${wheelAngle}deg)`, `rotate(${target}deg)`] },
-        { duration: SPIN_MS, easing: SPIN_EASING, fill: 'forwards' },
-      );
-      wheelAnimation.onfinish = () => land(target);
+      // Pick any tea but the current one, then a spot inside its slice (away from the edges).
+      const others = items.filter(canWin);
+      const pool = others.length ? others : items; // a lone tea can only win again
+      const index = items.indexOf(pool[Math.floor(Math.random() * pool.length)]);
+      rotateTo(angleToSlice(index, 0.15 + Math.random() * 0.7) + SPIN_TURNS * 360, SPIN_MS);
     }
 
     function land(angle) {
       setWheelAngle(angle);
       if (wheelAnimation) wheelAnimation.cancel();
       wheelAnimation = null;
-      spinning = false;
 
       // Whatever sits under the pointer wins, so the result is right even if the list changed mid-spin.
-      const index = Math.floor(((360 - wheelAngle) % 360) / (360 / items.length));
-      const winner = items[Math.min(index, items.length - 1)];
+      const count = items.length;
+      const index = Math.min(Math.floor(((360 - wheelAngle) % 360) / (360 / count)), count - 1);
+      // If such a change left the current tea under the pointer, roll on to the next one that may win.
+      if (count && !canWin(items[index]) && items.some(canWin)) {
+        let next = index;
+        do next = (next - 1 + count) % count; while (!canWin(items[next]));
+        rotateTo(angleToSlice(next, 0.5), NUDGE_MS);
+        return;
+      }
+
+      spinning = false;
+      const winner = items[index];
       winnerId = winner ? winner.id : null;
+      saveWinner();
       renderWheel();
       if (winner) {
         celebrate();
@@ -461,6 +518,10 @@
     function remove(id) {
       items = items.filter(item => item.id !== id);
       if (editingId === id) editingId = null;
+      if (winnerId === id) {
+        winnerId = null;
+        saveWinner();
+      }
       save();
       render();
     }
@@ -478,8 +539,9 @@
 
     // Keep other open tabs of this page in step.
     window.addEventListener('storage', event => {
-      if (event.key !== STORAGE_KEY && event.key !== null) return;
+      if (event.key !== STORAGE_KEY && event.key !== WINNER_KEY && event.key !== null) return;
       items = load();
+      if (!spinning) winnerId = loadWinner();
       if (!items.some(item => item.id === editingId)) editingId = null;
       render();
     });
