@@ -115,7 +115,7 @@ try {
   const head = await ev(`const mid = r => r.left + r.width / 2; const m = $('main').getBoundingClientRect(), range = document.createRange(); range.selectNodeContents($('h1'));
     const text = range.getBoundingClientRect(), pot = $('.teapot').getBoundingClientRect();
     return { textOff: mid(text) - mid(m), potOff: mid(pot) - mid(m), weight: +getComputedStyle($('h1')).fontWeight, potAboveText: pot.bottom <= text.top + 12 && pot.top >= 0, potSize: pot.width, potHidden: $('.teapot').getAttribute('aria-hidden'), noCat: !document.querySelector('[class*=cat]'), text: $('h1').textContent };`);
-  check('heading: "IZBIRNIK ČAJEV" is centred and bold', head.text === 'IZBIRNIK ČAJEV' && Math.abs(head.textOff) < 1 && head.weight >= 700, JSON.stringify(head));
+  check('heading: "IZBIRNIK ČAJA" is centred and bold', head.text === 'IZBIRNIK ČAJA' && Math.abs(head.textOff) < 1 && head.weight >= 700, JSON.stringify(head));
   check('heading: a small teapot sits centred on top of it (the cat is gone), hidden from screen readers', head.noCat && Math.abs(head.potOff) < 1 && head.potAboveText && head.potSize >= 40 && head.potSize <= 64 && head.potHidden === 'true', JSON.stringify(head));
   const steamA = await ev(`const wisps = [...document.querySelectorAll('.teapot .pot-steam')]; const pot = $('.teapot ellipse.pot-body').getBoundingClientRect();
     return { wisps: wisps.length, names: wisps.map(w => getComputedStyle(w).animationName).join(), states: wisps.map(w => w.getAnimations()[0]?.playState).join(), endless: wisps.every(w => getComputedStyle(w).animationIterationCount === 'infinite'),
@@ -298,7 +298,7 @@ try {
   const sv = expr => run(helpers + wheelHelpers + spinHelpers + expr);
   const landedOk = s => s.sign === `Čaj dneva: ${s.tea.toUpperCase()}` && s.sliceIsWinner && s.winners === 1 && s.off < s.half * 0.75 && !s.disabled;
 
-  check('tab title is "Izbirnik čajev", heading "IZBIRNIK ČAJEV", page language is Slovenian', await sv(`return document.title === 'Izbirnik čajev' && $('h1').textContent === 'IZBIRNIK ČAJEV' && document.documentElement.lang === 'sl';`));
+  check('tab title is "Izbirnik čaja", heading "IZBIRNIK ČAJA", page language is Slovenian', await sv(`return document.title === 'Izbirnik čaja' && $('h1').textContent === 'IZBIRNIK ČAJA' && document.documentElement.lang === 'sl';`));
   await sv(`['Earl Grey', 'Sencha', 'Rooibos', 'Oolong', 'Chai'].forEach(add);`);
   check('spin button: labelled, enabled, below the wheel; no sign yet', await sv(`return spinBtn.textContent === 'Zavrti kolo!' && !spinBtn.disabled && spinBtn.getBoundingClientRect().top >= $('#wheel svg').getBoundingClientRect().bottom && sign() === null;`));
   check('idle: still spinning slowly before any spin', await sv(`const a = spin.getAnimations(); return a.length === 1 && a[0].effect.getTiming().duration === 40000 && a[0].playState === 'running';`));
@@ -549,7 +549,7 @@ try {
     $('#add-input').value = ''; $('#add-form').requestSubmit();
     return (seen + ' | ' + err()).match(/\\b(add|edit|delete|save|cancel|tea|teas|spin|wheel|string|strings|characters?|day|new|yet|enter|close|empty|button)\\b/gi);`);
   check('no English UI text remains', english === null, String(english));
-  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['IZBIRNIK ČAJEV', 'Seznam čajev', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
+  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['IZBIRNIK ČAJA', 'Seznam čajev', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
 
   check('no uncaught page errors', errors.length === 0, errors.join('; '));
   // Ask Chrome to quit by itself: killing only the main process leaves helpers that keep writing to the profile.

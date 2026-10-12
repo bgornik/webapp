@@ -1,4 +1,4 @@
-# Izbirnik čajev
+# Izbirnik čaja
 
 A one-page tea picker: keep a list of teas, spin the wheel, and get the tea of the day.
 

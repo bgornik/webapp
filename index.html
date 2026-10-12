@@ -3,7 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Izbirnik čajev</title>
+  <title>Izbirnik čaja</title>
+  <!-- The manifest is what lets a phone install the page as an app. -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#d97706">
   <style>
     :root {
       color-scheme: light dark;
@@ -141,7 +145,7 @@
         <circle class="pot-dark" cx="30" cy="23" r="2.8"/>
         <path class="pot-shine" d="M18 42 C19 36 23 33.5 27 33.5"/>
       </svg>
-      <h1>IZBIRNIK ČAJEV</h1>
+      <h1>IZBIRNIK ČAJA</h1>
     </header>
     <div id="wheel">
       <svg viewBox="-100 -100 200 200" role="img" aria-label="Vrteče se kolo z enim poljem za vsak čaj">
@@ -637,6 +641,9 @@
 
     render();
     startIdle();
+
+    // Keeps a copy of the page for when there is no connection (see sw.js). The page works without it.
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   </script>
 </body>
 </html>
