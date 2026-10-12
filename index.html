@@ -15,7 +15,7 @@
       --muted: #6b7280;
       --accent: #2563eb;
       --danger: #b91c1c;
-      --trim: #d97706; /* wheel rim and the border of the "Čaj dneva" sign: one colour, one thickness */
+      --trim: #d97706; /* the orange of the wheel rim, the "Čaj dneva" border (same thickness too) and the menu dots */
       --trim-width: 6px;
       --spin-a: #2563eb; /* the spin button drifts slowly through these three */
       --spin-b: #7c3aed;
@@ -52,7 +52,7 @@
       background: none;
       color: inherit;
     }
-    #menu-button svg { width: 1.5rem; height: 1.5rem; fill: currentColor; }
+    #menu-button svg { width: 1.5rem; height: 1.5rem; fill: var(--trim); } /* orange dots, like the wheel's rim */
     #menu-button:hover, #menu-button[aria-expanded="true"] { background: rgb(128 128 128 / 0.2); }
     #menu {
       position: absolute;

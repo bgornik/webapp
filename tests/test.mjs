@@ -848,6 +848,8 @@ try {
       const page = getComputedStyle(probe).backgroundColor; probe.remove(); const rim = getComputedStyle($('#wheel svg')).borderTopColor;
       const a = lum(rim), b = lum(page); const [r, g, bl] = rim.match(/[\\d.]+/g).map(Number);
       return { scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', rim, page, contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), colourful: Math.max(r, g, bl) - Math.min(r, g, bl) > 80 };`);
+    const dots = await ev(`return [...document.querySelectorAll('#menu-button svg circle')].map(c => getComputedStyle(c).fill);`);
+    check(`kebab (${scheme} theme): its three dots are the same orange as the wheel rim`, dots.length === 3 && dots.every(c => c === rimColour.rim) && rimColour.rim === 'rgb(217, 119, 6)', JSON.stringify(dots));
     check(`wheel rim (${scheme} theme): a real colour that contrasts with the page background`, rimColour.scheme === scheme && rimColour.rim !== rimColour.page && rimColour.contrast >= 3 && rimColour.colourful, JSON.stringify(rimColour));
     const glow = await ev(`const lum = ${luminance}; const b = $('#spin-button'), a = b.getAnimations()[0], d = a.effect.getTiming().duration; a.pause(); const seen = [];
       for (let i = 0; i < 18; i++) { a.currentTime = d * i / 18; const cs = getComputedStyle(b), x = lum(cs.backgroundColor), y = lum(cs.color); seen.push({ bg: cs.backgroundColor, border: cs.borderTopColor, contrast: (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }); }
