@@ -179,7 +179,7 @@
     // localStorage is shared by every site under bgornik.github.io, so the key is namespaced.
     // It predates the rename to a tea picker and is kept so saved lists survive.
     const STORAGE_KEY = 'webapp.strings';
-    const WINNER_KEY = 'webapp.winner'; // id of the current tea of the day
+    const WINNER_KEY = 'webapp.winner'; // the current tea of the day and the day it was picked
     const SAVE_ERROR = 'Shranjevanje ni uspelo: shramba brskalnika ni na voljo ali je polna.';
     const MAX_LENGTH = 20;
 
@@ -219,7 +219,9 @@
 
     let items = load();
     let editingId = null;
-    let winnerId = loadWinner();
+    let winnerId = null;
+    let winnerDay = null; // the day it was picked, as YYYY-MM-DD; this is the date the sign shows
+    loadWinner();
     let avoidName = null; // while spinning: the current tea of the day, which must not win again
     let spinning = false;
     let wheelAngle = 0; // degrees clockwise, where the wheel rests when nothing is animating it
@@ -244,22 +246,52 @@
       }
     }
 
+    // Reads the saved pick into winnerId and winnerDay. It is saved as {"id": "...", "day": "2026-10-12"};
+    // earlier versions saved the bare id, which loads as a pick whose day is unknown.
     function loadWinner() {
+      winnerId = null;
+      winnerDay = null;
+      let raw = null;
       try {
-        const id = localStorage.getItem(WINNER_KEY);
-        return items.some(item => item.id === id) ? id : null;
+        raw = localStorage.getItem(WINNER_KEY);
       } catch {
-        return null;
+        return;
       }
+      if (raw === null) return;
+      let saved = { id: raw };
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') saved = parsed;
+      } catch {
+        // not JSON: the old bare-id format
+      }
+      if (!items.some(item => item.id === saved.id)) return;
+      winnerId = saved.id;
+      winnerDay = parseDay(saved.day) ? saved.day : null;
     }
 
     function saveWinner() {
       try {
-        if (winnerId) localStorage.setItem(WINNER_KEY, winnerId);
+        if (winnerId) localStorage.setItem(WINNER_KEY, JSON.stringify({ id: winnerId, day: winnerDay }));
         else localStorage.removeItem(WINNER_KEY);
       } catch {
         showError(SAVE_ERROR);
       }
+    }
+
+    // Today on this device's calendar, as YYYY-MM-DD.
+    function today() {
+      const now = new Date();
+      const pad = number => String(number).padStart(2, '0');
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    }
+
+    // A saved YYYY-MM-DD day as a local date, or null if it is missing or not a real date.
+    function parseDay(day) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+      if (!match) return null;
+      const date = new Date(+match[1], match[2] - 1, +match[3]);
+      return date.getMonth() === match[2] - 1 && date.getDate() === +match[3] ? date : null;
     }
 
     // How a tea reads on the sign. Two teas that read the same there count as the same tea.
@@ -415,7 +447,9 @@
       resultEl.hidden = !winner;
       // The sign shouts the name; the stored tea and its wheel label keep their own case.
       resultNameEl.textContent = winner ? signName(winner) : '';
-      resultDateEl.textContent = DATE_FORMAT.format(new Date());
+      // The date is the day the tea was picked, not today; a pick saved without one shows no date.
+      const pickedOn = winner ? parseDay(winnerDay) : null;
+      resultDateEl.textContent = pickedOn ? DATE_FORMAT.format(pickedOn) : '';
     }
 
     function setWheelAngle(angle) {
@@ -495,6 +529,7 @@
       spinning = false;
       const winner = items[index];
       winnerId = winner ? winner.id : null;
+      winnerDay = winner ? today() : null;
       saveWinner();
       renderWheel();
       if (winner) {
@@ -596,6 +631,7 @@
       if (editingId === id) editingId = null;
       if (winnerId === id) {
         winnerId = null;
+        winnerDay = null;
         saveWinner();
       }
       save();
@@ -617,7 +653,7 @@
     window.addEventListener('storage', event => {
       if (event.key !== STORAGE_KEY && event.key !== WINNER_KEY && event.key !== null) return;
       items = load();
-      if (!spinning) winnerId = loadWinner();
+      if (!spinning) loadWinner();
       if (!items.some(item => item.id === editingId)) editingId = null;
       render();
     });

@@ -405,7 +405,7 @@ try {
   check('an already-uppercase tea is unchanged on the sign', await sv(`return sign() === 'Čaj dneva: ALREADY UPPER 123';`), await sv(`return sign();`));
 
   // ---- the pick is saved, and a spin never repeats the current tea ----
-  const savedPick = `(() => { const id = localStorage.getItem('webapp.winner'); const it = JSON.parse(localStorage.getItem('webapp.strings') || '[]').find(i => i.id === id); return it ? it.text : null; })()`;
+  const savedPick = `(() => { const saved = JSON.parse(localStorage.getItem('webapp.winner') || 'null'); const it = JSON.parse(localStorage.getItem('webapp.strings') || '[]').find(i => saved && i.id === saved.id); return it ? it.text : null; })()`;
   await ev(`localStorage.clear();`);
   await load();
   await sv(`['Zeleni', 'Črni', 'Meta'].forEach(add);`);
@@ -440,6 +440,50 @@ try {
   const lone = [(await fastSpin()).tea, (await fastSpin()).tea];
   check('1 tea: it can only win again, and the spin still completes', lone[0] === lone[1] && lone[0] === two[6], lone.join(','));
 
+  // ---- the day of the pick is saved with it, and that saved day is what the sign shows ----
+  const dayState = `(() => { const now = new Date(); const pad = n => String(n).padStart(2, '0'); const raw = localStorage.getItem('webapp.winner'); let saved = null; try { saved = JSON.parse(raw); } catch {}
+    return { raw, saved, today: now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()), todayText: new Intl.DateTimeFormat('sl', { weekday: 'short', day: 'numeric', month: 'short' }).format(now),
+      date: $('#result-date').textContent, dateHeight: $('#result-date').getBoundingClientRect().height, sign: sign(), whole: $('#result').hidden ? null : $('#result').innerText }; })()`;
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`['Zeleni', 'Črni', 'Meta'].forEach(add);`);
+  const dayPick = await fastSpin();
+  const fresh = await sv(`return ${dayState};`);
+  check('pick is saved together with the day it was made', fresh.saved && fresh.saved.day === fresh.today && Object.keys(fresh.saved).sort().join() === 'day,id', fresh.raw);
+  check('sign shows that day right after the spin', fresh.date === fresh.todayText && fresh.dateHeight > 0, JSON.stringify(fresh));
+
+  // Make the saved pick an older one. (March 2026: the 5th is a Thursday, the 6th a Friday.)
+  const [oldDay, oldText] = fresh.today === '2026-03-05' ? ['2026-03-06', 'pet., 6. mar.'] : ['2026-03-05', 'čet., 5. mar.'];
+  await sv(`const saved = JSON.parse(localStorage.getItem('webapp.winner')); saved.day = '${oldDay}'; localStorage.setItem('webapp.winner', JSON.stringify(saved));`);
+  await load();
+  const older = await sv(`return ${dayState};`);
+  check('reload: sign shows the saved day, not today', older.date === oldText && older.date !== older.todayText && older.sign === `Čaj dneva: ${dayPick.tea.toUpperCase()}` && older.whole === `${oldText}\nČaj dneva:\n${dayPick.tea.toUpperCase()}`, JSON.stringify(older));
+  await sv(`add('Kamilica'); btn('Kamilica', 'Uredi').click(); const i = $('#list li form input'); i.value = 'Lipa'; i.closest('form').requestSubmit(); btn('Lipa', 'Izbriši').click();`);
+  const afterEdits = await sv(`return ${dayState};`);
+  check('editing the list leaves the saved day alone', afterEdits.date === oldText && afterEdits.saved.day === oldDay, JSON.stringify(afterEdits));
+  await sv(`spinBtn.click();`);
+  const midSpinDay = await sv(`return ${dayState};`);
+  check('during a spin the saved pick and its day are still the old ones', midSpinDay.saved.day === oldDay && midSpinDay.sign === null, JSON.stringify(midSpinDay));
+  await sv(`spin.getAnimations()[0].finish();`);
+  await settle();
+  const respun = await sv(`return ${dayState};`);
+  check('a new spin saves and shows today', respun.saved.day === respun.today && respun.date === respun.todayText && respun.sign !== older.sign, JSON.stringify(respun));
+
+  // A pick saved by an earlier version of the page (bare id, no day) still loads; it just has no date.
+  await sv(`localStorage.setItem('webapp.winner', JSON.parse(localStorage.getItem('webapp.winner')).id);`);
+  await load();
+  const legacy = await sv(`return ${dayState};`);
+  check('old-format saved pick: tea still shown, date line simply absent', legacy.sign === respun.sign && legacy.date === '' && legacy.dateHeight === 0 && legacy.whole === legacy.sign.replace(': ', ':\n') && !/invalid/i.test(legacy.whole), JSON.stringify(legacy));
+  for (const badDay of ['2026-13-45', '2026-02-30', 'yesterday', 20261012, null]) {
+    await sv(`const id = JSON.parse(localStorage.getItem('webapp.strings')).find(i => 'Čaj dneva: ' + i.text.toUpperCase() === ${JSON.stringify(respun.sign)}).id; localStorage.setItem('webapp.winner', JSON.stringify({ id, day: ${JSON.stringify(badDay)} }));`);
+    await load();
+    const bad = await sv(`return ${dayState};`);
+    check(`unusable saved day (${JSON.stringify(badDay)}): tea shown without a date`, bad.sign === respun.sign && bad.date === '' && !/invalid|NaN/i.test(bad.whole), JSON.stringify(bad));
+  }
+  const upgraded = await fastSpin();
+  const upgradedState = await sv(`return ${dayState};`);
+  check('next spin after that saves the new format with today', upgradedState.saved && upgradedState.saved.day === upgradedState.today && upgradedState.date === upgradedState.todayText && upgraded.tea.toUpperCase() === upgradedState.sign.slice('Čaj dneva: '.length), JSON.stringify(upgradedState));
+
   // Same tea written in different cases reads identically on the sign, so it counts as the same tea.
   await ev(`localStorage.clear();`);
   await load();
@@ -457,8 +501,8 @@ try {
   await sv(`['A1', 'B2', 'C3'].forEach(add);`);
   let cur = (await fastSpin()).tea;
   const other = ['A1', 'B2', 'C3'].find(t => t !== cur);
-  await sv(`const id = JSON.parse(localStorage.getItem('webapp.strings')).find(i => i.text === ${JSON.stringify(other)}).id; localStorage.setItem('webapp.winner', id); window.dispatchEvent(new StorageEvent('storage', { key: 'webapp.winner' }));`);
-  check('pick changed in another tab shows up here', await sv(`return sign() === 'Čaj dneva: ${other}';`), await sv(`return sign();`));
+  await sv(`const id = JSON.parse(localStorage.getItem('webapp.strings')).find(i => i.text === ${JSON.stringify(other)}).id; localStorage.setItem('webapp.winner', JSON.stringify({ id, day: '2026-03-05' })); window.dispatchEvent(new StorageEvent('storage', { key: 'webapp.winner' }));`);
+  check('pick changed in another tab shows up here, with its saved day', await sv(`return sign() === 'Čaj dneva: ${other}' && $('#result-date').textContent === 'čet., 5. mar.';`), await sv(`return $('#result').textContent;`));
   cur = other;
 
   // Shrink the list mid-spin so the slices resize under the wheel; the current tea must still never win.
