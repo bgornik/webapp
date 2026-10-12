@@ -15,7 +15,11 @@
       --muted: #6b7280;
       --accent: #2563eb;
       --danger: #b91c1c;
-      --trim: #d97706; /* wheel rim and the border of the "Čaj dneva" sign */
+      --trim: #d97706; /* wheel rim and the border of the "Čaj dneva" sign: one colour, one thickness */
+      --trim-width: 6px;
+      --spin-a: #2563eb; /* the spin button drifts slowly through these three */
+      --spin-b: #7c3aed;
+      --spin-c: #0f766e;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -23,6 +27,9 @@
         --muted: #9ca3af;
         --accent: #60a5fa;
         --danger: #f87171;
+        --spin-a: #60a5fa;
+        --spin-b: #a78bfa;
+        --spin-c: #2dd4bf;
       }
     }
     * { box-sizing: border-box; }
@@ -33,9 +40,8 @@
     }
     main { max-width: 32rem; margin: 0 auto; }
     header { display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem; }
-    h1 { margin: 0; font-weight: 800; text-align: center; }
-    /* A teapot sits on the title, with steam drifting up from its spout. */
-    .teapot { width: 3.5rem; height: 3.5rem; overflow: visible; }
+    /* A teapot heads the page, with steam drifting up from its spout. */
+    .teapot { width: 4.5rem; height: 4.5rem; overflow: visible; }
     .pot-body { fill: #f59e0b; }
     .pot-dark { fill: #d97706; }
     .pot-handle { fill: none; stroke: #d97706; stroke-width: 4; stroke-linecap: round; }
@@ -83,23 +89,42 @@
     li .text { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; white-space: pre-wrap; }
     li form { flex: 1; min-width: 0; }
     #wheel { text-align: center; }
-    #wheel svg { display: block; width: min(100%, 24rem); margin: 0 auto; }
+    /* The rim is the picture's own round border, so it is exactly as thick as the sign's border.
+       The picture ends at the slices' edge; the pointer and the winner's outline spill over the rim. */
+    #wheel svg {
+      display: block;
+      width: min(100%, 24rem);
+      margin: 0 auto;
+      border: var(--trim-width) solid var(--trim);
+      border-radius: 50%;
+      overflow: visible;
+    }
     #wheel-spin { transform-box: fill-box; transform-origin: center; }
     #wheel-spin path, #wheel-spin circle { stroke: #fff; stroke-width: 0.6; }
     #wheel-spin circle.empty { fill: var(--border); }
     #wheel-spin path.winner, #wheel-spin circle.winner { stroke: #facc15; stroke-width: 3; stroke-linejoin: round; }
     #wheel-spin text { fill: #fff; font-weight: 600; white-space: pre; }
-    #wheel .rim { fill: none; stroke: var(--trim); stroke-width: 4; }
     #wheel .hub { fill: #fff; stroke: #1f2937; stroke-width: 1.5; }
     #wheel .pointer { fill: #1f2937; stroke: #fff; stroke-width: 1; stroke-linejoin: round; }
-    #spin-button { margin-top: 1.5rem; padding: 0.7rem 1.6rem; font-size: 1.15rem; font-weight: 600; }
-    #spin-button:disabled { opacity: 0.6; cursor: default; }
+    #spin-button {
+      margin-top: 1.5rem;
+      padding: 0.7rem 1.6rem;
+      font-size: 1.15rem;
+      font-weight: 600;
+      animation: glow 9s ease-in-out infinite;
+    }
+    #spin-button:disabled { opacity: 0.6; cursor: default; animation-play-state: paused; }
+    @keyframes glow {
+      0%, 100% { background-color: var(--spin-a); border-color: var(--spin-a); }
+      33% { background-color: var(--spin-b); border-color: var(--spin-b); }
+      66% { background-color: var(--spin-c); border-color: var(--spin-c); }
+    }
     #hint { color: var(--muted); margin: 1rem 0 0; }
     #edit-teas { display: block; margin: 1.5rem auto 0; }
     #result {
       margin: 1.5rem 0 0;
       padding: 1.25rem 1rem;
-      border: 3px solid var(--trim);
+      border: var(--trim-width) solid var(--trim);
       border-radius: 12px;
       background: #fef3c7;
       color: #78350f;
@@ -145,16 +170,14 @@
         <circle class="pot-dark" cx="30" cy="23" r="2.8"/>
         <path class="pot-shine" d="M18 42 C19 36 23 33.5 27 33.5"/>
       </svg>
-      <h1>IZBIRNIK ČAJA</h1>
     </header>
     <div id="wheel">
-      <svg viewBox="-100 -100 200 200" role="img" aria-label="Vrteče se kolo z enim poljem za vsak čaj">
-        <circle class="rim" r="97.75"/>
+      <svg viewBox="-96 -96 192 192" role="img" aria-label="Vrteče se kolo z enim poljem za vsak čaj">
         <g id="wheel-spin"></g>
         <circle class="hub" r="7"/>
         <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
       </svg>
-      <button id="spin-button" type="button" class="primary">Zavrti kolo!</button>
+      <button id="spin-button" type="button" class="primary">ZAVRTI KOLOČAJ</button>
       <p id="hint" hidden>Kolo je prazno. Čaje dodaš z gumbom »Seznam čajev«.</p>
       <p id="result" role="status" hidden><span id="result-date"></span> Čaj dneva: <strong id="result-name"></strong></p>
     </div>
@@ -197,7 +220,7 @@
     const resultNameEl = document.getElementById('result-name');
     const resultDateEl = document.getElementById('result-date');
 
-    // Wheel geometry, in the SVG's own units (the viewBox is 200 wide, centred on 0,0).
+    // Wheel geometry, in the SVG's own units (the viewBox is centred on 0,0 and ends at the slices' edge).
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const WHEEL_RADIUS = 96;
     const LABEL_OUTER = 92;

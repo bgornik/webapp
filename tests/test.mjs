@@ -127,18 +127,19 @@ try {
 
   check('empty state shown on first load', await ev(`return !$('#empty').hidden && texts().length === 0;`));
   check('no teas: blank wheel shown, spin button disabled, no labels', await ev(`const g = $('#wheel-spin'); return g.querySelectorAll('circle.empty').length === 1 && g.querySelectorAll('path, text').length === 0 && $('#spin-button').disabled && $('#wheel svg').getBoundingClientRect().width > 200;`));
-  const order = await ev(`const top = s => $(s).getBoundingClientRect().top; return ['h1', '#wheel svg', '#spin-button', '#hint'].map(top);`);
-  check('landing: heading, wheel, spin button, then the empty-wheel hint', order.every((v, i) => i === 0 || v > order[i - 1]), order.join(','));
+  const order = await ev(`const top = s => $(s).getBoundingClientRect().top; return ['.teapot', '#wheel svg', '#spin-button', '#hint'].map(top);`);
+  check('landing: teapot, wheel, spin button, then the empty-wheel hint', order.every((v, i) => i === 0 || v > order[i - 1]), order.join(','));
+  check('no teas: the disabled spin button holds its colour still', await ev(`return $('#spin-button').disabled && getComputedStyle($('#spin-button')).animationPlayState === 'paused';`));
   check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš z gumbom »Seznam čajev«.';`));
-  const head = await ev(`const mid = r => r.left + r.width / 2; const m = $('main').getBoundingClientRect(), range = document.createRange(); range.selectNodeContents($('h1'));
-    const text = range.getBoundingClientRect(), pot = $('.teapot').getBoundingClientRect();
-    return { textOff: mid(text) - mid(m), potOff: mid(pot) - mid(m), weight: +getComputedStyle($('h1')).fontWeight, potAboveText: pot.bottom <= text.top + 12 && pot.top >= 0, potSize: pot.width, potHidden: $('.teapot').getAttribute('aria-hidden'), noCat: !document.querySelector('[class*=cat]'), text: $('h1').textContent };`);
-  check('heading: "IZBIRNIK ČAJA" is centred and bold', head.text === 'IZBIRNIK ČAJA' && Math.abs(head.textOff) < 1 && head.weight >= 700, JSON.stringify(head));
-  check('heading: a small teapot sits centred on top of it (the cat is gone), hidden from screen readers', head.noCat && Math.abs(head.potOff) < 1 && head.potAboveText && head.potSize >= 40 && head.potSize <= 64 && head.potHidden === 'true', JSON.stringify(head));
+  const head = await ev(`const mid = r => r.left + r.width / 2; const m = $('main').getBoundingClientRect(), pot = $('.teapot').getBoundingClientRect(), wheel = $('#wheel svg').getBoundingClientRect();
+    return { potOff: mid(pot) - mid(m), potTop: pot.top, gapToWheel: wheel.top - pot.bottom, potSize: pot.width, potHeight: pot.height, potHidden: $('.teapot').getAttribute('aria-hidden'), noCat: !document.querySelector('[class*=cat]'),
+      headings: document.querySelectorAll('h1').length, titleCard: /izbirnik/i.test(document.body.innerText), headerKids: [...$('header').children].map(e => e.tagName.toLowerCase()).join(), tab: document.title };`);
+  check('title card is gone: no heading and no "IZBIRNIK ČAJA" text on the page (the tab title stays)', head.headings === 0 && !head.titleCard && head.headerKids === 'svg' && head.tab === 'Izbirnik čaja', JSON.stringify(head));
+  check('teapot: a little larger (72px), centred above the wheel, hidden from screen readers', head.noCat && Math.abs(head.potOff) < 1 && head.potSize === 72 && head.potHeight === 72 && head.potTop >= 0 && head.gapToWheel >= 8 && head.potHidden === 'true', JSON.stringify(head));
   const steamA = await ev(`const wisps = [...document.querySelectorAll('.teapot .pot-steam')]; const pot = $('.teapot ellipse.pot-body').getBoundingClientRect();
     return { wisps: wisps.length, names: wisps.map(w => getComputedStyle(w).animationName).join(), states: wisps.map(w => w.getAnimations()[0]?.playState).join(), endless: wisps.every(w => getComputedStyle(w).animationIterationCount === 'infinite'),
       seconds: parseFloat(getComputedStyle(wisps[0]).animationDuration), staggered: getComputedStyle(wisps[0]).animationDelay !== getComputedStyle(wisps[1]).animationDelay,
-      abovePot: wisps.every(w => w.getBoundingClientRect().bottom <= pot.top + 2), others: [...$('.teapot').querySelectorAll('*')].filter(e => !e.classList.contains('pot-steam') && e.getAnimations().length).length,
+      abovePot: wisps.every(w => w.getBoundingClientRect().bottom <= pot.top + 8), others: [...$('.teapot').querySelectorAll('*')].filter(e => !e.classList.contains('pot-steam') && e.getAnimations().length).length,
       frame: wisps.map(w => getComputedStyle(w).transform + getComputedStyle(w).opacity).join(), parts: ['.pot-handle', 'path.pot-body', 'ellipse.pot-body', '.pot-shine'].every(q => $('.teapot ' + q)) };`);
   await sleep(600);
   const steamB = await ev(`return [...document.querySelectorAll('.teapot .pot-steam')].map(w => getComputedStyle(w).transform + getComputedStyle(w).opacity).join();`);
@@ -257,9 +258,15 @@ try {
   await shoot('wheel-3');
 
   await wv(`btn('second item', 'Uredi').click(); const i = $('#list li form input'); i.value = 'renamed'; i.closest('form').requestSubmit();`);
-  const rim = await wv(`const svg = $('#wheel svg').getBoundingClientRect(); const el = $('#wheel .rim'); const cs = getComputedStyle(el); const px = svg.width / 200; const r = +el.getAttribute('r'), w = parseFloat(cs.strokeWidth);
-    return { widthPx: w * px, outer: r + w / 2, inner: r - w / 2, visibleUnits: r + w / 2 - 96, stroke: cs.stroke, fill: cs.fill, behindSlices: !!(el.compareDocumentPosition(spin) & Node.DOCUMENT_POSITION_FOLLOWING), cx: el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2, hubx: $('#wheel .hub').getBoundingClientRect().left + $('#wheel .hub').getBoundingClientRect().width / 2 };`);
-  check('wheel: thick solid rim around the slices, inside the picture, concentric', rim.visibleUnits >= 3.5 && rim.widthPx >= 7 && rim.outer <= 100 && rim.inner <= 96 && rim.fill === 'none' && rim.behindSlices && Math.abs(rim.cx - rim.hubx) < 0.5, JSON.stringify(rim));
+  // Geometry is read in the wheel's own units and mapped to the screen, because Chrome reports loose
+  // on-screen boxes for rotated shapes.
+  const rim = await wv(`const svg = $('#wheel svg'), cs = getComputedStyle(svg), box = svg.getBoundingClientRect(), b = parseFloat(cs.borderTopWidth), disc = spin.getBBox(), m = svg.getScreenCTM();
+    const edge = (x, y) => new DOMPoint(x, y).matrixTransform(m); const R = disc.width / 2;
+    return { widths: [cs.borderTopWidth, cs.borderRightWidth, cs.borderBottomWidth, cs.borderLeftWidth].join(), style: cs.borderTopStyle, radius: cs.borderTopLeftRadius, round: Math.abs(box.width - box.height) < 0.5,
+      discRadius: R, discCentred: Math.abs(disc.x + R) < 0.01 && Math.abs(disc.y + R) < 0.01,
+      gapLeft: edge(-R, 0).x - (box.left + b), gapRight: (box.right - b) - edge(R, 0).x, gapTop: edge(0, -R).y - (box.top + b), gapBottom: (box.bottom - b) - edge(0, R).y,
+      oldRim: !!$('#wheel .rim'), hubOff: Math.hypot(centre(svg)[0] - centre($('#wheel .hub'))[0], centre(svg)[1] - centre($('#wheel .hub'))[1]), pointerOverRim: $('#wheel .pointer').getBoundingClientRect().top < box.top + b };`);
+  check('wheel: the rim is a solid round border, hugging the slices all the way round', new Set(rim.widths.split(',')).size === 1 && parseFloat(rim.widths) >= 4 && rim.style === 'solid' && rim.radius === '50%' && rim.round && Math.abs(rim.discRadius - 96) < 0.01 && rim.discCentred && [rim.gapLeft, rim.gapRight, rim.gapTop, rim.gapBottom].every(g => Math.abs(g) < 0.5) && !rim.oldRim && rim.hubOff < 0.5 && rim.pointerOverRim, JSON.stringify(rim));
   check('wheel: follows an edit', await wv(`return labels().includes('renamed') && !labels().includes('second item');`));
   await wv(`btn('renamed', 'Izbriši').click();`);
   check('wheel: follows a delete', await wv(`return slices().length === 2 && !labels().includes('renamed');`));
@@ -306,9 +313,8 @@ try {
       }
       // Is the spot just under the pointer tip inside the highlighted slice? Mapped through the slice's own
       // on-screen transform, so it holds wherever the page happens to be scrolled.
-      const r = $('#wheel svg').getBoundingClientRect();
       const w = spin.querySelector('.winner');
-      const sliceIsWinner = !!w && w.isPointInFill(new DOMPoint(r.left + r.width / 2, r.top + r.height * 6 / 200).matrixTransform(w.getScreenCTM().inverse()));
+      const sliceIsWinner = !!w && w.isPointInFill(new DOMPoint(0, -94).matrixTransform($('#wheel svg').getScreenCTM()).matrixTransform(w.getScreenCTM().inverse()));
       return { tea, off, half: 180 / spin.querySelectorAll('text').length, sliceIsWinner, winners: spin.querySelectorAll('.winner').length };
     };
     const state = () => ({ sign: sign(), disabled: spinBtn.disabled, anims: spin.getAnimations().length, confetti: document.querySelectorAll('canvas.confetti').length, ...underPointer() });
@@ -316,9 +322,13 @@ try {
   const sv = expr => run(helpers + wheelHelpers + spinHelpers + expr);
   const landedOk = s => s.sign === `Čaj dneva: ${s.tea.toUpperCase()}` && s.sliceIsWinner && s.winners === 1 && s.off < s.half * 0.75 && !s.disabled;
 
-  check('tab title is "Izbirnik čaja", heading "IZBIRNIK ČAJA", page language is Slovenian', await sv(`return document.title === 'Izbirnik čaja' && $('h1').textContent === 'IZBIRNIK ČAJA' && document.documentElement.lang === 'sl';`));
+  check('tab title is "Izbirnik čaja", page language is Slovenian', await sv(`return document.title === 'Izbirnik čaja' && !$('h1') && document.documentElement.lang === 'sl';`));
   await sv(`['Earl Grey', 'Sencha', 'Rooibos', 'Oolong', 'Chai'].forEach(add);`);
-  check('spin button: labelled, enabled, below the wheel; no sign yet', await sv(`return spinBtn.textContent === 'Zavrti kolo!' && !spinBtn.disabled && spinBtn.getBoundingClientRect().top >= $('#wheel svg').getBoundingClientRect().bottom && sign() === null;`));
+  check('spin button: labelled, enabled, below the wheel; no sign yet', await sv(`return spinBtn.textContent === 'ZAVRTI KOLOČAJ' && !spinBtn.disabled && spinBtn.getBoundingClientRect().top >= $('#wheel svg').getBoundingClientRect().bottom && sign() === null;`));
+  const glowA = await sv(`const cs = getComputedStyle(spinBtn), a = spinBtn.getAnimations()[0]; return { name: cs.animationName, endless: cs.animationIterationCount, seconds: parseFloat(cs.animationDuration), state: a && a.playState, bg: cs.backgroundColor };`);
+  await sleep(1500);
+  const glowB = await sv(`return getComputedStyle(spinBtn).backgroundColor;`);
+  check('spin button: background drifts slowly from colour to colour, endlessly', glowA.name === 'glow' && glowA.endless === 'infinite' && glowA.seconds >= 6 && glowA.state === 'running' && glowA.bg !== glowB, JSON.stringify(glowA) + ' -> ' + glowB);
   check('idle: still spinning slowly before any spin', await sv(`const a = spin.getAnimations(); return a.length === 1 && a[0].effect.getTiming().duration === 40000 && a[0].playState === 'running';`));
 
   // One spin in real time.
@@ -544,7 +554,7 @@ try {
     for (const type of ['touchStart', 'touchEnd']) await send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchStart' ? [{ x, y }] : [] });
     await sleep(300);
   };
-  check('phone: teapot, heading, wheel, spin button and "Seznam čajev" all fit on the first screen', await sv(`return scrollY === 0 && $('#edit-teas').getBoundingClientRect().bottom <= innerHeight && $('.teapot').getBoundingClientRect().top >= 0 && spinBtn.getBoundingClientRect().bottom <= $('#edit-teas').getBoundingClientRect().top;`));
+  check('phone: teapot, wheel, spin button and "Seznam čajev" all fit on the first screen', await sv(`return scrollY === 0 && $('#edit-teas').getBoundingClientRect().bottom <= innerHeight && $('.teapot').getBoundingClientRect().top >= 0 && spinBtn.getBoundingClientRect().bottom <= $('#edit-teas').getBoundingClientRect().top;`));
   await tap(...await sv(`return middle('#edit-teas');`));
   const sheet = await sv(`const d = dialog.getBoundingClientRect(), i = $('#add-input').getBoundingClientRect(); return { open: dialog.open, left: d.left, right: d.right, top: d.top, bottom: d.bottom, vw: innerWidth, vh: innerHeight, inputBottom: i.bottom, rows: document.querySelectorAll('#list li').length, rowsShown: [...document.querySelectorAll('#list li')].every(li => li.getBoundingClientRect().bottom <= d.bottom) };`);
   check('phone: tapping "Seznam čajev" opens the editor, inside the screen', sheet.open && sheet.left >= 0 && sheet.right <= sheet.vw && sheet.top >= 0 && sheet.bottom <= sheet.vh && sheet.rows === 5, JSON.stringify(sheet));
@@ -568,6 +578,8 @@ try {
   const phoneSign = await sv(`const range = document.createRange(); range.setStartAfter($('#result-date')); range.setEndBefore($('#result-name')); const lh = parseFloat(getComputedStyle($('#result-date')).lineHeight);
     return { dateRows: Math.round($('#result-date').getBoundingClientRect().height / lh), labelRows: range.getClientRects().length, dateFirst: $('#result-date').getBoundingClientRect().bottom <= range.getBoundingClientRect().top + 4, editBelow: $('#edit-teas').getBoundingClientRect().top >= $('#result').getBoundingClientRect().bottom };`);
   check('phone: date line, then "Čaj dneva:", each on one line; list button below the sign', phoneSign.dateRows === 1 && phoneSign.labelRows === 1 && phoneSign.dateFirst && phoneSign.editBelow, JSON.stringify(phoneSign));
+  const thick = await sv(`const w = el => ['Top', 'Right', 'Bottom', 'Left'].map(s => getComputedStyle(el)['border' + s + 'Width']).join(); return { rim: w($('#wheel svg')), sign: w($('#result')) };`);
+  check('phone: wheel rim and sign border are equally thick', thick.rim === thick.sign && new Set(thick.rim.split(',')).size === 1, JSON.stringify(thick));
   check('phone: sign ends up fully on screen', signBox.top >= 0 && signBox.bottom <= signBox.vh + 0.5, JSON.stringify(signBox));
   const shotQ = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(scratch, 'phone-settled.png'), Buffer.from(shotQ.result.data, 'base64'));
@@ -581,14 +593,19 @@ try {
     await load();
     await ev(`['Zeleni', 'Črni', 'Meta', 'Kamilica'].forEach(add); window.scrollTo(0, 0);`);
     const rimColour = await ev(`const lum = ${luminance}; const probe = document.createElement('div'); probe.style.background = 'Canvas'; document.body.append(probe);
-      const page = getComputedStyle(probe).backgroundColor; probe.remove(); const rim = getComputedStyle($('#wheel .rim')).stroke;
+      const page = getComputedStyle(probe).backgroundColor; probe.remove(); const rim = getComputedStyle($('#wheel svg')).borderTopColor;
       const a = lum(rim), b = lum(page); const [r, g, bl] = rim.match(/[\\d.]+/g).map(Number);
       return { scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', rim, page, contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), colourful: Math.max(r, g, bl) - Math.min(r, g, bl) > 80 };`);
     check(`wheel rim (${scheme} theme): a real colour that contrasts with the page background`, rimColour.scheme === scheme && rimColour.rim !== rimColour.page && rimColour.contrast >= 3 && rimColour.colourful, JSON.stringify(rimColour));
+    const glow = await ev(`const lum = ${luminance}; const b = $('#spin-button'), a = b.getAnimations()[0], d = a.effect.getTiming().duration; a.pause(); const seen = [];
+      for (let i = 0; i < 18; i++) { a.currentTime = d * i / 18; const cs = getComputedStyle(b), x = lum(cs.backgroundColor), y = lum(cs.color); seen.push({ bg: cs.backgroundColor, border: cs.borderTopColor, contrast: (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }); }
+      a.play(); return { colours: new Set(seen.map(o => o.bg)).size, worst: Math.min(...seen.map(o => o.contrast)), borderFollows: seen.every(o => o.bg === o.border), first: seen[0].bg, third: seen[6].bg, twoThirds: seen[12].bg };`);
+    check(`spin button (${scheme} theme): label stays readable through the whole colour cycle`, glow.colours >= 12 && glow.worst >= 4.5 && glow.borderFollows && new Set([glow.first, glow.third, glow.twoThirds]).size === 3, JSON.stringify(glow));
     await ev(`$('#spin-button').click(); document.getElementById('wheel-spin').getAnimations()[0].finish();`);
     await sleep(600);
-    const trim = await ev(`const cs = getComputedStyle($('#result')); return { shown: !$('#result').hidden, rim: getComputedStyle($('#wheel .rim')).stroke, sides: [cs.borderTopColor, cs.borderRightColor, cs.borderBottomColor, cs.borderLeftColor], width: cs.borderTopWidth, style: cs.borderTopStyle };`);
-    check(`sign border (${scheme} theme): same colour as the wheel rim`, trim.shown && trim.sides.every(c => c === trim.rim) && trim.style === 'solid' && parseFloat(trim.width) >= 2, JSON.stringify(trim));
+    const trim = await ev(`const sides = el => { const cs = getComputedStyle(el); return ['Top', 'Right', 'Bottom', 'Left'].map(s => cs['border' + s + 'Width'] + ' ' + cs['border' + s + 'Style'] + ' ' + cs['border' + s + 'Color']); };
+      return { shown: !$('#result').hidden, rim: sides($('#wheel svg')), sign: sides($('#result')) };`);
+    check(`sign border (${scheme} theme): same colour and same thickness as the wheel rim`, trim.shown && new Set([...trim.rim, ...trim.sign]).size === 1 && /^[4-9]px solid /.test(trim.rim[0]), JSON.stringify(trim));
     await ev(`window.scrollTo(0, 0);`);
     const shotT = await send('Page.captureScreenshot', { format: 'png' });
     writeFileSync(join(scratch, `landing-${scheme}.png`), Buffer.from(shotT.result.data, 'base64'));
@@ -611,7 +628,7 @@ try {
     $('#add-input').value = ''; $('#add-form').requestSubmit();
     return (seen + ' | ' + err()).match(/\\b(add|edit|delete|save|cancel|tea|teas|spin|wheel|string|strings|characters?|day|new|yet|enter|close|empty|button)\\b/gi);`);
   check('no English UI text remains', english === null, String(english));
-  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['IZBIRNIK ČAJA', 'Seznam čajev', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'Zavrti kolo!', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
+  check('expected Slovenian labels are shown', await ev(`const t = document.body.innerText; return ['Seznam čajev', 'Čaji', 'Zapri', 'Dodaj', 'Shrani', 'Prekliči', 'Uredi', 'Izbriši', 'ZAVRTI KOLOČAJ', 'Čaj dneva:', 'Vnesi vsaj en znak.'].every(w => t.includes(w)) && $('#add-input').placeholder === 'Dodaj čaj (največ 20 znakov)';`));
 
   // ---- installable as an app, and usable without a connection ----
   await ev(`localStorage.clear();`);
