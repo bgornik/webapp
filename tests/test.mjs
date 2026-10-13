@@ -40,10 +40,58 @@ const server = createServer((req, res) => {
   }
   if (file[0] === 'index.html') pageRequests++;
   res.writeHead(200, { 'content-type': file[1], 'cache-control': 'no-store' });
-  res.end(readFileSync(join(siteDir, file[0])));
+  res.end(file[0] === 'index.html' ? pageForTests() : readFileSync(join(siteDir, file[0])));
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const HTTP_PORT = server.address().port;
+
+// The page is always served with the sync address chosen here, whatever index.html says: empty (sharing
+// off) for most of the run, the stand-in below for the sharing checks. The tests must never reach the
+// real shared state.
+const sync = { url: '', everyMs: 30000 };
+function pageForTests() {
+  const settings = [[/const SYNC_URL = '[^']*';/g, `const SYNC_URL = '${sync.url}';`], [/const SYNC_EVERY_MS = \d+;/g, `const SYNC_EVERY_MS = ${sync.everyMs};`]];
+  let html = readFileSync(join(siteDir, 'index.html'), 'utf8');
+  for (const [pattern, replacement] of settings) {
+    if ((html.match(pattern) || []).length !== 1) throw new Error(`index.html should contain ${pattern} exactly once`);
+    html = html.replace(pattern, replacement);
+  }
+  return html;
+}
+
+// A stand-in for the Apps Script web app (apps-script/Code.gs): one JSON document, read with GET and
+// replaced with POST. Like the real one it is on another origin, answers a POST with a redirect to
+// the result, and cannot answer a CORS preflight.
+const shared = { body: '{}', gets: 0, posts: [], preflights: 0, down: false, garbage: false };
+const sharedServer = createServer(async (req, res) => {
+  if (shared.down) {
+    req.socket.destroy();
+    return;
+  }
+  const cors = { 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
+  if (req.method === 'OPTIONS') {
+    shared.preflights++;
+    res.writeHead(405).end();
+    return;
+  }
+  if (req.method === 'POST') {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = Buffer.concat(chunks).toString('utf8');
+    shared.posts.push({ body, type: req.headers['content-type'] || '' });
+    if (!shared.garbage) shared.body = body;
+    res.writeHead(302, { ...cors, location: '/echo' }).end();
+    return;
+  }
+  if (new URL(req.url, 'http://localhost').pathname === '/exec') shared.gets++;
+  if (shared.garbage) {
+    res.writeHead(200, { ...cors, 'content-type': 'text/html; charset=utf-8' }).end('<!DOCTYPE html><title>Error</title><p>Script function not found');
+    return;
+  }
+  res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' }).end(shared.body);
+});
+await new Promise(r => sharedServer.listen(0, '127.0.0.1', r));
+const SHARED_URL = `http://127.0.0.1:${sharedServer.address().port}/exec`;
 
 const chrome = spawn(process.env.CHROME || 'google-chrome', ['--headless=new', '--no-first-run', '--disable-gpu', '--remote-debugging-port=0',
   `--user-data-dir=${profile}`, '--window-size=600,700', 'about:blank'], { stdio: 'ignore' });
@@ -51,6 +99,7 @@ let chromeError = null;
 chrome.on('error', e => { chromeError = e; });
 const cleanup = async () => {
   server.close();
+  sharedServer.close();
   if (chrome.exitCode === null && !chromeError) {
     const exited = new Promise(r => chrome.once('exit', r));
     await Promise.race([exited, sleep(1500)]);
@@ -927,6 +976,200 @@ try {
   offline = false;
   await load();
   check('back online: page loads from the network again, pick still there', pageRequests === requestsBefore + 2 && await ev(`return !$('#result').hidden;`), `${pageRequests - requestsBefore} requests`);
+
+  // ---- shared state, through the stand-in for the Apps Script web app ----
+  check('sharing: everything above ran with sharing off and contacted no sync address', shared.gets === 0 && shared.posts.length === 0 && (await ev(`return SYNC_URL === '' && $('#sync-status').hidden;`)), JSON.stringify({ gets: shared.gets, posts: shared.posts.length }));
+  const sharedNow = () => JSON.parse(shared.body);
+  const teasOf = state => (state.teas || []).map(t => t.text).join('|');
+  const uploaded = () => sleep(800); // the 300ms gathering delay, plus the round trip
+  const lookAgain = async () => { await ev(`document.dispatchEvent(new Event('visibilitychange'));`); await sleep(500); }; // what the timer does every 30s
+  const local = `(() => ({ teas: texts().join('|'), sign: sign(), day: $('#result-date').textContent, history: [...document.querySelectorAll('#history-list li')].map(li => li.querySelector('.text').textContent + ' @ ' + li.querySelector('.when').textContent).join('|'),
+    status: $('#sync-status').hidden ? null : $('#sync-status').textContent, unsent: localStorage.getItem('webapp.unsent'), joined: localStorage.getItem('webapp.joined'), url: SYNC_URL }))()`;
+
+  // A device that already has teas and a pick is the first to share: its state becomes the shared one.
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`['Zeleni', 'Črni'].forEach(add);`);
+  const firstPick = await fastSpin();
+  sync.url = SHARED_URL;
+  await load();
+  await uploaded();
+  const seeded = await sv(`return ${local};`);
+  check('sharing: with nothing shared yet, the first device\'s teas, pick and history become the shared state', seeded.url === SHARED_URL && teasOf(sharedNow()) === 'Črni|Zeleni' && sharedNow().winner.day === (await sv(`return today();`)) && sharedNow().history.length === 1 && sharedNow().history[0].text === firstPick.tea && seeded.teas === 'Črni|Zeleni', shared.body);
+  check('sharing: it is sent as one plain-text POST, with no preflight (which Apps Script cannot answer)', shared.posts.length === 1 && shared.posts[0].type.startsWith('text/plain') && shared.preflights === 0 && Object.keys(sharedNow()).sort().join() === 'history,teas,winner', JSON.stringify(shared.posts.map(p => p.type)) + ' preflights ' + shared.preflights);
+  check('sharing: the menu says when it was last in step', /^Sinhronizirano ob \d{2}:\d{2}$/.test(seeded.status) && seeded.unsent === null && seeded.joined === '1', JSON.stringify(seeded));
+  await ev(`$('#menu-button').click();`);
+  const statusLook = await ev(`const s = $('#sync-status').getBoundingClientRect(), m = $('#menu').getBoundingClientRect(), last = $('#open-history').getBoundingClientRect(); return { shown: shown('#sync-status'), below: s.top >= last.bottom, inside: s.left >= m.left && s.right <= m.right && s.bottom <= m.bottom, small: parseFloat(getComputedStyle($('#sync-status')).fontSize) < 14, items: [...$('#menu').querySelectorAll('[role=menuitem]')].length }; `);
+  check('sharing: that line sits at the foot of the menu, small, and is not a menu item', statusLook.shown && statusLook.below && statusLook.inside && statusLook.small && statusLook.items === 2, JSON.stringify(statusLook));
+  await ev(`$('#menu-button').click();`);
+
+  // A second device, with nothing of its own, opens the page.
+  const postsBefore = shared.posts.length;
+  await ev(`localStorage.clear();`);
+  await load();
+  await sleep(500);
+  await sv(`renderHistory();`);
+  const joined = await sv(`return ${local};`);
+  check('sharing: another device opening the page gets the shared teas, pick and history', joined.teas === 'Črni|Zeleni' && joined.sign === `Čaj dneva: ${firstPick.tea.toUpperCase()}` && joined.day !== '' && joined.history.startsWith(firstPick.tea + ' @ ') && joined.joined === '1', JSON.stringify(joined));
+  check('sharing: merely reading uploads nothing', shared.posts.length === postsBefore, `${shared.posts.length - postsBefore} uploads`);
+  check('sharing: the wheel shows the shared teas and highlights the shared pick', await sv(`return labels().join('|') === 'Črni|Zeleni' && spin.querySelector('.winner-label').textContent === ${JSON.stringify(firstPick.tea)};`));
+
+  // Changes made here go up.
+  await sv(`add('Meta');`);
+  await uploaded();
+  check('sharing: adding a tea uploads the new list', teasOf(sharedNow()) === 'Meta|Črni|Zeleni' && shared.posts.length === postsBefore + 1, shared.body);
+  await sv(`btn('Meta', 'Uredi').click(); const i = $('#list li form input'); i.value = 'Meta poprova'; i.closest('form').requestSubmit();`);
+  await uploaded();
+  check('sharing: renaming a tea uploads it', teasOf(sharedNow()) === 'Meta poprova|Črni|Zeleni', shared.body);
+  await sv(`del('Meta poprova');`);
+  await uploaded();
+  check('sharing: deleting a tea uploads it', teasOf(sharedNow()) === 'Črni|Zeleni', shared.body);
+  const postsBeforeSpin = shared.posts.length;
+  const sharedPick = await fastSpin();
+  await uploaded();
+  const afterSpin = sharedNow();
+  check('sharing: a spin uploads the new pick with its day, and the longer history, in one go', afterSpin.teas.find(t => t.id === afterSpin.winner.id).text === sharedPick.tea && /^\d{4}-\d{2}-\d{2}$/.test(afterSpin.winner.day) && afterSpin.history.length === 2 && afterSpin.history[0].text === sharedPick.tea && /^\d{2}:\d{2}$/.test(afterSpin.history[0].time) && shared.posts.length === postsBeforeSpin + 1, shared.body);
+  await sv(`$('#open-history').click(); [...$('#history-actions').querySelectorAll('button')][0].click(); [...$('#history-actions').querySelectorAll('button')].find(b => b.textContent === 'Da').click(); $('#history-dialog').close();`);
+  await uploaded();
+  check('sharing: clearing the history uploads an empty history', sharedNow().history.length === 0 && sharedNow().winner !== null, shared.body);
+
+  // Changes made on another device come down.
+  const elsewhere = sharedNow();
+  elsewhere.teas.unshift({ id: 'drugje1', text: 'Kamilica' });
+  elsewhere.winner = { id: 'drugje1', day: '2026-03-05' };
+  elsewhere.history = [{ text: 'Kamilica', day: '2026-03-05', time: '07:45' }];
+  shared.body = JSON.stringify(elsewhere);
+  const postsBeforeLook = shared.posts.length, getsBeforeLook = shared.gets;
+  await lookAgain();
+  const adopted = await sv(`return ${local};`);
+  check('sharing: a tea added on another device appears here on the next look', adopted.teas === 'Kamilica|Črni|Zeleni' && (await sv(`return labels().join('|') === 'Kamilica|Črni|Zeleni' && stored().join('|') === 'Kamilica|Črni|Zeleni';`)) && shared.gets === getsBeforeLook + 1, JSON.stringify(adopted));
+  check('sharing: so does a pick made there, with its day, and its history entry', adopted.sign === 'Čaj dneva: KAMILICA' && adopted.day === 'četrtek, 5. marec' && adopted.history === 'Kamilica @ četrtek, 5. marec ob 07:45' && (await sv(`return spin.querySelector('.winner-label').textContent === 'Kamilica';`)), JSON.stringify(adopted));
+  check('sharing: taking in someone else\'s change does not upload it back', shared.posts.length === postsBeforeLook, `${shared.posts.length - postsBeforeLook} uploads`);
+  await sv(`window.__slice = spin.querySelector('.winner'); window.__row = $('#list li');`);
+  await lookAgain();
+  await lookAgain();
+  check('sharing: looking again when nothing changed redraws nothing', await sv(`return window.__slice.isConnected && window.__slice === spin.querySelector('.winner') && window.__row === $('#list li');`) && shared.gets === getsBeforeLook + 3 && shared.posts.length === postsBeforeLook);
+
+  // An open edit survives a download that does not touch that tea; a tea deleted elsewhere drops out of it.
+  await sv(`$('#edit-teas').click(); btn('Črni', 'Uredi').click(); $('#list li form input').value = 'Črni polovič';`);
+  const withMore = sharedNow();
+  withMore.teas.push({ id: 'drugje2', text: 'Lipa' });
+  shared.body = JSON.stringify(withMore);
+  await lookAgain();
+  check('sharing: a download while a tea is being edited keeps the edit open and adds the new tea', await sv(`return !!$('#list li form') && texts().includes('Lipa') && $('#list li form input').value === 'Črni';`), await sv(`return texts().join('|') + ' / ' + ($('#list li form input') || {}).value;`));
+  const without = sharedNow();
+  without.teas = without.teas.filter(t => t.text !== 'Črni');
+  shared.body = JSON.stringify(without);
+  await lookAgain();
+  check('sharing: if the tea being edited was deleted elsewhere, the edit simply closes', await sv(`return !$('#list li form') && !stored().includes('Črni') && texts().join('|') === 'Kamilica|Zeleni|Lipa';`), await sv(`return texts().join('|');`));
+  await sv(`dialog.close();`);
+
+  // The timer: with no events at all, the page keeps looking by itself.
+  sync.everyMs = 250;
+  await load();
+  await sleep(300);
+  const getsAtStart = shared.gets;
+  await sleep(1400);
+  check('sharing: the page looks at the shared state again on a timer, unprompted', shared.gets - getsAtStart >= 4 && shared.gets - getsAtStart <= 7, `${shared.gets - getsAtStart} looks in 1.4s at a 250ms interval`);
+  sync.everyMs = 30000;
+  await load();
+  await sleep(400);
+
+  // During a spin the shared state is left alone; the spin's own result goes up afterwards.
+  await sv(`spinBtn.click();`);
+  const getsMidSpin = shared.gets;
+  const midSpinShared = sharedNow();
+  midSpinShared.teas.push({ id: 'drugje3', text: 'Bezeg' });
+  shared.body = JSON.stringify(midSpinShared);
+  await lookAgain();
+  check('sharing: nothing is downloaded while the wheel is spinning', shared.gets === getsMidSpin && await sv(`return !texts().includes('Bezeg') && spinBtn.disabled;`));
+  await sv(`spin.getAnimations()[0].finish();`);
+  await settle();
+  await uploaded();
+  const landedShared = await sv(`return ${local};`);
+  check('sharing: when it lands, this device\'s state is uploaded and is what everyone now has (last write wins)', teasOf(sharedNow()) === landedShared.teas && !teasOf(sharedNow()).includes('Bezeg') && 'Čaj dneva: ' + sharedNow().teas.find(t => t.id === sharedNow().winner.id).text.toUpperCase() === landedShared.sign, shared.body);
+
+  // Out of reach: changes are kept here, flagged, and go up when the connection is back.
+  shared.down = true;
+  await sv(`add('Šipek');`);
+  await uploaded();
+  const cutOff = await sv(`return ${local};`);
+  check('sharing: with no connection the change is kept on the device and the menu says it is waiting', cutOff.teas.startsWith('Šipek|') && cutOff.status === 'Ni povezave – spremembe čakajo' && cutOff.unsent === '1' && !teasOf(sharedNow()).includes('Šipek'), JSON.stringify(cutOff));
+  await load();
+  await sleep(500);
+  const stillCutOff = await sv(`return ${local};`);
+  check('sharing: that survives a reload while still out of reach', stillCutOff.teas.startsWith('Šipek|') && stillCutOff.unsent === '1' && stillCutOff.status === 'Ni povezave – spremembe čakajo', JSON.stringify(stillCutOff));
+  const meanwhile = sharedNow();
+  meanwhile.teas.push({ id: 'drugje4', text: 'Žajbelj' });
+  shared.body = JSON.stringify(meanwhile);
+  shared.down = false;
+  await ev(`window.dispatchEvent(new Event('online'));`);
+  await uploaded();
+  const backOn = await sv(`return ${local};`);
+  check('sharing: once back, the waiting change is uploaded first and replaces what was there (last write wins)', teasOf(sharedNow()) === backOn.teas && teasOf(sharedNow()).startsWith('Šipek|') && !teasOf(sharedNow()).includes('Žajbelj') && backOn.unsent === null && /^Sinhronizirano ob /.test(backOn.status), shared.body + ' ' + JSON.stringify(backOn));
+
+  // The address answers, but not with the state (an Apps Script error page, say).
+  shared.garbage = true;
+  const beforeGarbage = await sv(`return ${local};`);
+  await lookAgain();
+  const afterGarbage = await sv(`return ${local};`);
+  check('sharing: an unusable answer changes nothing here and is reported as no connection', afterGarbage.teas === beforeGarbage.teas && afterGarbage.sign === beforeGarbage.sign && afterGarbage.status === 'Ni povezave – spremembe čakajo', JSON.stringify(afterGarbage));
+  await sv(`add('Lapacho');`);
+  await uploaded();
+  check('sharing: an upload answered that way stays flagged as unsent', await sv(`return localStorage.getItem('webapp.unsent') === '1' && texts()[0] === 'Lapacho';`) && !teasOf(sharedNow()).includes('Lapacho'));
+  shared.garbage = false;
+  await lookAgain();
+  await uploaded();
+  check('sharing: and goes up on the next look once the address works again', teasOf(sharedNow()).startsWith('Lapacho|') && await sv(`return localStorage.getItem('webapp.unsent') === null;`), shared.body);
+  for (const [name, body] of [['an error object', '{"error":"not JSON"}'], ['a JSON string', '"hello"'], ['null', 'null']]) {
+    const kept = shared.body;
+    shared.body = body;
+    await lookAgain();
+    const r = await sv(`return ${local};`);
+    if (r.teas !== beforeGarbage.teas.replace(/^/, 'Lapacho|') || shared.posts.at(-1).body === body) check(`sharing: ${name} from the address is ignored`, false, JSON.stringify(r));
+    else check(`sharing: ${name} from the address is ignored`, true);
+    shared.body = kept;
+  }
+
+  // Shared data with unusable entries in it is cleaned on the way in, not shown as broken rows.
+  const tidy = shared.body;
+  shared.body = JSON.stringify({ teas: [{ id: 'ok1', text: 'Dober' }, 5, null, { text: 'brez id' }, { id: 'x', text: 7 }], winner: { id: 'ni ga', day: '2026-03-05' }, history: 'ni seznam' });
+  await lookAgain();
+  await sv(`renderHistory();`);
+  const cleaned = await sv(`return ${local};`);
+  check('sharing: unusable entries in the shared state are dropped; the rest is shown', cleaned.teas === 'Dober' && cleaned.sign === null && cleaned.history === '' && (await sv(`return labels().join('|') === 'Dober' && !/undefined|NaN|null/.test(document.body.innerText);`)), JSON.stringify(cleaned));
+  shared.body = tidy;
+  await lookAgain();
+
+  // The shared file is emptied by hand (or replaced): a device that still has the state puts it back.
+  const holding = await sv(`return ${local};`);
+  shared.body = '{}';
+  await lookAgain();
+  await uploaded();
+  check('sharing: if the shared state goes blank, a device that still holds it shares it again', teasOf(sharedNow()) === holding.teas && holding.teas !== '', shared.body);
+
+  // A device that already had its own teas joins: they are added to the shared list, not lost and not doubled.
+  const sharedTeas = teasOf(sharedNow());
+  sync.url = '';
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`['Moj čaj', 'LAPACHO', 'Drugi moj'].forEach(add);`);
+  const ownPick = await fastSpin();
+  sync.url = SHARED_URL;
+  const postsBeforeJoin = shared.posts.length;
+  await load();
+  await uploaded();
+  const merged = await sv(`return ${local};`);
+  check('sharing: a device with teas of its own keeps them when it joins; same-named ones are not doubled', merged.teas === `Drugi moj|Moj čaj|${sharedTeas}` && teasOf(sharedNow()) === merged.teas && shared.posts.length === postsBeforeJoin + 1 && sharedTeas.includes('Lapacho') && !merged.teas.includes('LAPACHO'), JSON.stringify(merged) + ' own pick ' + ownPick.tea);
+  check('sharing: the pick and history it takes on are the shared ones', merged.sign === holding.sign && JSON.stringify(sharedNow().winner) !== 'null', JSON.stringify(merged));
+  await load();
+  await sleep(600);
+  check('sharing: that merge happens once; later visits just read', shared.posts.length === postsBeforeJoin + 1 && (await sv(`return texts().join('|');`)) === merged.teas);
+
+  sync.url = '';
+  await ev(`localStorage.clear();`);
+  await load();
+  check('sharing: off again for the rest of the run', await ev(`return SYNC_URL === '' && $('#sync-status').hidden;`));
 
   check('no uncaught page errors', errors.length === 0, errors.join('; '));
   // Ask Chrome to quit by itself: killing only the main process leaves helpers that keep writing to the profile.

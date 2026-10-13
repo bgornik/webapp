@@ -76,6 +76,16 @@
       text-align: left;
     }
     #menu button:hover, #menu button:focus-visible { background: rgb(128 128 128 / 0.2); }
+    /* Says when the shared state was last in step, or that it is out of reach. */
+    #sync-status {
+      margin: 0.3rem 0 0;
+      padding: 0.45rem 0.8rem 0.3rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-align: left;
+      white-space: nowrap;
+    }
     header { display: flex; flex-direction: column; align-items: center; margin-bottom: 1.75rem; }
     /* A teapot heads the page, with steam drifting up from its spout. */
     .teapot { width: 4.5rem; height: 4.5rem; overflow: visible; }
@@ -242,6 +252,7 @@
       <div id="menu" role="menu" hidden>
         <button id="edit-teas" type="button" role="menuitem" aria-haspopup="dialog">Seznam čajev</button>
         <button id="open-history" type="button" role="menuitem" aria-haspopup="dialog">Zgodovina izbranih čajev</button>
+        <p id="sync-status" role="presentation" hidden></p>
       </div>
     </div>
     <header>
@@ -301,6 +312,13 @@
     const WINNER_KEY = 'webapp.winner'; // the current tea of the day and the day it was picked
     const HISTORY_KEY = 'webapp.history'; // the last few picks, newest first, as [{ text, day, time }]
     const HISTORY_LENGTH = 10;
+
+    // Shared state: the address of the Apps Script web app that keeps it in one file in Google Drive
+    // (apps-script/Code.gs; README.md has the setup). While this is empty, everything stays on this device.
+    const SYNC_URL = '';
+    const SYNC_EVERY_MS = 30000;
+    const UNSENT_KEY = 'webapp.unsent'; // set while this device has changes the shared copy has not received
+    const JOINED_KEY = 'webapp.joined'; // set once this device's own teas have been added to the shared list
     const SAVE_ERROR = 'Shranjevanje ni uspelo: shramba brskalnika ni na voljo ali je polna.';
     const MAX_LENGTH = 20;
 
@@ -316,6 +334,7 @@
     const historyListEl = document.getElementById('history-list');
     const historyEmptyEl = document.getElementById('history-empty');
     const historyActionsEl = document.getElementById('history-actions');
+    const syncStatusEl = document.getElementById('sync-status');
     const hintEl = document.getElementById('hint');
     const wheelEl = document.getElementById('wheel');
     const spinEl = document.getElementById('wheel-spin');
@@ -348,6 +367,9 @@
     let editingId = null;
     let deletingId = null; // the tea whose row is asking "Izbrišem?"
     let clearingHistory = false; // the history dialog is asking the same about the whole history
+    let localChanges = 0; // counts changes made here, so a download that started earlier cannot undo a newer one
+    let uploadTimer = null;
+    let uploading = false;
     let winnerId = null;
     let winnerDay = null; // the day it was picked, as YYYY-MM-DD; this is the date the sign shows
     loadWinner();
@@ -374,6 +396,7 @@
       } catch {
         showError(SAVE_ERROR);
       }
+      queueUpload();
     }
 
     // Reads the saved pick into winnerId and winnerDay. It is saved as {"id": "...", "day": "2026-10-12"};
@@ -407,6 +430,7 @@
       } catch {
         showError(SAVE_ERROR);
       }
+      queueUpload();
     }
 
     // The history keeps each tea's name as it was when picked, so later renames and deletions do not rewrite it.
@@ -432,6 +456,7 @@
       } catch {
         showError(SAVE_ERROR);
       }
+      queueUpload();
     }
 
     function renderHistory() {
@@ -917,11 +942,125 @@
       items = load();
       if (!spinning) loadWinner();
       picks = loadHistory();
+      redraw();
+    });
+
+    // Redraws everything after the state was replaced from outside (another tab, or the shared copy).
+    function redraw() {
       renderHistory();
       if (!items.some(item => item.id === editingId)) editingId = null;
       if (!items.some(item => item.id === deletingId)) deletingId = null;
       render();
-    });
+    }
+
+    // ---- Shared state ----
+    // localStorage stays the working copy, so the app still opens at once and offline. On top of that,
+    // every change made here is uploaded whole, and the shared copy is downloaded every so often and
+    // replaces the local one. The last write wins; simultaneous edits are not merged.
+
+    function flag(key) {
+      try {
+        return localStorage.getItem(key) === '1';
+      } catch {
+        return false;
+      }
+    }
+
+    function setFlag(key, on) {
+      try {
+        if (on) localStorage.setItem(key, '1');
+        else localStorage.removeItem(key);
+      } catch {
+        // without storage there is nothing to remember
+      }
+    }
+
+    function sharedState() {
+      return { teas: items, winner: winnerId ? { id: winnerId, day: winnerDay } : null, history: picks };
+    }
+
+    function showSync(inStep) {
+      syncStatusEl.hidden = false;
+      syncStatusEl.textContent = inStep ? `Sinhronizirano ob ${clock()}` : 'Ni povezave – spremembe čakajo';
+    }
+
+    // Called after every local save. Saves made in quick succession (a pick makes two) go up together.
+    function queueUpload() {
+      if (!SYNC_URL) return;
+      localChanges++;
+      setFlag(UNSENT_KEY, true);
+      clearTimeout(uploadTimer);
+      uploadTimer = setTimeout(upload, 300);
+    }
+
+    async function upload() {
+      if (uploading) return; // the upload in flight starts another when it ends, if anything changed meanwhile
+      uploading = true;
+      const sent = localChanges;
+      try {
+        // A text body with no extra headers keeps this a "simple" request. Apps Script cannot answer
+        // the permission check browsers send ahead of any other kind of cross-site POST.
+        const response = await fetch(SYNC_URL, { method: 'POST', body: JSON.stringify(sharedState()) });
+        const saved = await response.json();
+        if (!saved || saved.error) throw new Error('refused');
+        if (sent === localChanges) setFlag(UNSENT_KEY, false);
+        showSync(true);
+      } catch {
+        showSync(false);
+      }
+      uploading = false;
+      if (sent !== localChanges) upload();
+    }
+
+    async function download() {
+      if (!SYNC_URL || document.hidden || spinning || uploading) return;
+      if (flag(UNSENT_KEY)) {
+        upload(); // changes made here while out of reach go up first
+        return;
+      }
+      const seen = localChanges;
+      let shared;
+      try {
+        const response = await fetch(SYNC_URL, { cache: 'no-store' });
+        shared = await response.json();
+        if (!shared || typeof shared !== 'object' || shared.error) throw new Error('unusable');
+      } catch {
+        showSync(false);
+        return;
+      }
+      showSync(true);
+      if (seen !== localChanges || spinning) return; // changed here meanwhile; that change is on its way up
+      adopt(shared);
+    }
+
+    // Replaces the local state with the shared one and redraws if that changed anything.
+    function adopt(shared) {
+      const joined = flag(JOINED_KEY);
+      setFlag(JOINED_KEY, true);
+      if (!Array.isArray(shared.teas)) {
+        // Nothing has been shared yet: this device's state becomes the shared one.
+        if (items.length || picks.length) queueUpload();
+        return;
+      }
+      // The first time a device joins, the teas it already had are added to the shared list, not lost.
+      const names = shared.teas.filter(tea => tea && typeof tea.text === 'string').map(tea => teaKey(tea.text));
+      const own = joined ? [] : items.filter(item => !names.includes(teaKey(item.text)));
+
+      const before = JSON.stringify(sharedState());
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([...own, ...shared.teas]));
+        if (shared.winner) localStorage.setItem(WINNER_KEY, JSON.stringify(shared.winner));
+        else localStorage.removeItem(WINNER_KEY);
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(Array.isArray(shared.history) ? shared.history : []));
+      } catch {
+        return;
+      }
+      items = load();
+      loadWinner();
+      picks = loadHistory();
+      if (JSON.stringify(sharedState()) !== before) redraw();
+      if (own.length) queueUpload();
+    }
 
     spinButton.addEventListener('click', spinWheel);
 
@@ -985,6 +1124,13 @@
 
     render();
     startIdle();
+
+    if (SYNC_URL) {
+      download();
+      setInterval(download, SYNC_EVERY_MS);
+      document.addEventListener('visibilitychange', download); // catch up as soon as the app is looked at again
+      window.addEventListener('online', download);
+    }
 
     // Keeps a copy of the page for when there is no connection (see sw.js). The page works without it.
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
