@@ -314,8 +314,8 @@
     const HISTORY_LENGTH = 10;
 
     // Shared state: the address of the Apps Script web app that keeps it in one file in Google Drive
-    // (apps-script/Code.gs; README.md has the setup). While this is empty, everything stays on this device.
-    const SYNC_URL = '';
+    // (apps-script/Code.gs; README.md has the setup). Emptying it keeps everything on the device again.
+    const SYNC_URL = 'https://script.google.com/macros/s/AKfycbx6e0bMfu4TIaF4xVZeUYOQOUBdnFnB0f3CtunNXbxhZ6n27aJClttfQuYLL5nfXibs2w/exec';
     const SYNC_EVERY_MS = 30000;
     const UNSENT_KEY = 'webapp.unsent'; // set while this device has changes the shared copy has not received
     const JOINED_KEY = 'webapp.joined'; // set once this device's own teas have been added to the shared list
