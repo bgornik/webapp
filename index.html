@@ -134,6 +134,9 @@
       border-bottom: 1px solid var(--border);
     }
     li .text { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; white-space: pre-wrap; }
+    /* The tick beside a tea decides whether it is on the wheel; a tea left off it is greyed. */
+    li input[type="checkbox"] { flex: none; width: 1.5rem; height: 1.5rem; margin: 0; padding: 0; accent-color: var(--trim); cursor: pointer; }
+    li.off .text { color: var(--muted); }
     /* "Izbrišem?" beside the Da / Ne buttons, in a tea's row and under the history. */
     .ask { color: var(--muted); white-space: nowrap; }
     /* Pinned to the bottom of the dialog, so it is in reach however long the list above it is. */
@@ -275,7 +278,7 @@
         <polygon class="pointer" points="-6,-100 6,-100 0,-86"/>
       </svg>
       <button id="spin-button" type="button" class="primary">ZAVRTI KOLOČAJ</button>
-      <p id="hint" hidden>Kolo je prazno. Čaje dodaš v meniju ⋮ zgoraj desno.</p>
+      <p id="hint" hidden>Kolo je prazno. Čaje dodaš ali vključiš v meniju ⋮ zgoraj desno.</p>
       <p id="result" role="status" hidden><span id="result-date"></span> Čaj dneva: <strong id="result-name"></strong></p>
     </div>
   </main>
@@ -579,6 +582,19 @@
     function renderItem(item) {
       const li = document.createElement('li');
       li.dataset.id = item.id;
+      li.classList.toggle('off', Boolean(item.off));
+
+      const onWheel = document.createElement('input');
+      onWheel.type = 'checkbox';
+      onWheel.checked = !item.off;
+      onWheel.setAttribute('aria-label', `Na kolesu: ${item.text}`);
+      onWheel.addEventListener('change', () => {
+        if (onWheel.checked) delete item.off;
+        else item.off = true;
+        li.classList.toggle('off', !onWheel.checked);
+        save();
+        renderWheel(); // only the wheel: redrawing the list would take the focus off the tick
+      });
 
       if (item.id === editingId) {
         const form = document.createElement('form');
@@ -608,7 +624,7 @@
           save();
           stopEditing();
         });
-        li.append(form);
+        li.append(onWheel, form);
         return li;
       }
 
@@ -619,7 +635,7 @@
         const ask = document.createElement('span');
         ask.className = 'ask';
         ask.textContent = 'Izbrišem?';
-        li.append(text, ask, button('Da', 'danger', () => remove(item.id)), button('Ne', 'keep', stopEditing));
+        li.append(onWheel, text, ask, button('Da', 'danger', () => remove(item.id)), button('Ne', 'keep', stopEditing));
         li.addEventListener('keydown', event => {
           if (event.key !== 'Escape') return;
           event.preventDefault(); // answer "no"; otherwise Escape would also close the dialog
@@ -628,11 +644,18 @@
         return li;
       }
       li.append(
+        onWheel,
         text,
         button('Uredi', '', () => startEditing(item.id)),
         button('Izbriši', 'danger', () => askDelete(item.id)),
       );
       return li;
+    }
+
+    // The teas ticked in the list. A tea is saved with "off: true" only when its tick is cleared,
+    // so teas saved before ticks existed count as ticked.
+    function wheelTeas() {
+      return items.filter(item => !item.off);
     }
 
     function svgEl(name, attrs) {
@@ -650,14 +673,15 @@
     // Only the contents of the spinning group are replaced, so the rotation never restarts.
     // Also keeps the spin button and the "Čaj dneva" sign in step with the list.
     function renderWheel() {
-      const count = items.length;
+      const teas = wheelTeas();
+      const count = teas.length;
       const step = 2 * Math.PI / count;
       const point = angle => `${(WHEEL_RADIUS * Math.cos(angle)).toFixed(3)} ${(WHEEL_RADIUS * Math.sin(angle)).toFixed(3)}`;
 
       const slices = [];
       const labels = [];
       let winnerSlice = null;
-      items.forEach((item, index) => {
+      teas.forEach((item, index) => {
         const start = index * step - Math.PI / 2; // the first slice starts at 12 o'clock
         const fill = sliceColor(index, count);
         const slice = count === 1
@@ -745,7 +769,7 @@
 
     // The rotation, at or just past the current one, that puts a spot of the given slice under the pointer.
     function angleToSlice(index, spot) {
-      const landing = (index + spot) * 360 / items.length;
+      const landing = (index + spot) * 360 / wheelTeas().length;
       return wheelAngle + ((360 - landing - wheelAngle) % 360 + 360) % 360;
     }
 
@@ -759,7 +783,8 @@
     }
 
     function spinWheel() {
-      if (spinning || items.length === 0) return;
+      const teas = wheelTeas();
+      if (spinning || teas.length === 0) return;
       stopIdle();
       const current = items.find(item => item.id === winnerId);
       avoidName = current ? signName(current) : null;
@@ -768,9 +793,9 @@
       renderWheel();
 
       // Pick any tea but the current one, then a spot inside its slice (away from the edges).
-      const others = items.filter(canWin);
-      const pool = others.length ? others : items; // a lone tea can only win again
-      const index = items.indexOf(pool[Math.floor(Math.random() * pool.length)]);
+      const others = teas.filter(canWin);
+      const pool = others.length ? others : teas; // a lone tea can only win again
+      const index = teas.indexOf(pool[Math.floor(Math.random() * pool.length)]);
       rotateTo(angleToSlice(index, 0.15 + Math.random() * 0.7) + SPIN_TURNS * 360, SPIN_MS);
     }
 
@@ -780,18 +805,19 @@
       wheelAnimation = null;
 
       // Whatever sits under the pointer wins, so the result is right even if the list changed mid-spin.
-      const count = items.length;
+      const teas = wheelTeas();
+      const count = teas.length;
       const index = Math.min(Math.floor(((360 - wheelAngle) % 360) / (360 / count)), count - 1);
       // If such a change left the current tea under the pointer, roll on to the next one that may win.
-      if (count && !canWin(items[index]) && items.some(canWin)) {
+      if (count && !canWin(teas[index]) && teas.some(canWin)) {
         let next = index;
-        do next = (next - 1 + count) % count; while (!canWin(items[next]));
+        do next = (next - 1 + count) % count; while (!canWin(teas[next]));
         rotateTo(angleToSlice(next, 0.5), NUDGE_MS);
         return;
       }
 
       spinning = false;
-      const winner = items[index];
+      const winner = teas[index];
       winnerId = winner ? winner.id : null;
       winnerDay = winner ? today() : null;
       saveWinner();

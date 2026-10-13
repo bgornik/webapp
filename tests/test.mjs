@@ -163,6 +163,9 @@ try {
     const row = t => [...document.querySelectorAll('#list li')].find(li => li.querySelector('.text')?.textContent === t);
     const btn = (t, label) => [...row(t).querySelectorAll('button')].find(b => b.textContent === label);
     const del = t => { btn(t, 'Izbriši').click(); btn(t, 'Da').click(); };
+    const tickOf = t => row(t).querySelector('input[type=checkbox]');
+    const onWheelNow = () => [...document.querySelectorAll('#wheel-spin text')].map(t => t.textContent).join('|');
+    const savedTeas = () => JSON.parse(localStorage.getItem('webapp.strings') || '[]');
     const err = () => $('#error').hidden ? '' : $('#error').textContent;
     const dialog = $('#teas-dialog');
     const shown = s => $(s).getClientRects().length > 0;
@@ -181,7 +184,7 @@ try {
   check('landing: teapot, wheel, spin button, then the empty-wheel hint', order.every((v, i) => i === 0 || v > order[i - 1]), order.join(','));
   check('no teas: the disabled spin button holds its colour still', await ev(`return $('#spin-button').disabled && getComputedStyle($('#spin-button')).animationPlayState === 'paused';`));
   check('no teas: the disabled spin button sends out no waves', await ev(`const b = $('#spin-button'); return b.getAnimations({ subtree: true }).every(a => a.animationName !== 'wave') && getComputedStyle(b, '::before').opacity === '0' && getComputedStyle(b, '::after').opacity === '0';`));
-  check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš v meniju ⋮ zgoraj desno.';`));
+  check('landing: hint points to the tea editor, in Slovenian', await ev(`return shown('#hint') && $('#hint').textContent === 'Kolo je prazno. Čaje dodaš ali vključiš v meniju ⋮ zgoraj desno.';`));
   const head = await ev(`const mid = r => r.left + r.width / 2; const m = $('main').getBoundingClientRect(), pot = $('.teapot').getBoundingClientRect(), wheel = $('#wheel svg').getBoundingClientRect();
     return { potOff: mid(pot) - mid(m), potTop: pot.top, gapToWheel: wheel.top - pot.bottom, potSize: pot.width, potHeight: pot.height, potHidden: $('.teapot').getAttribute('aria-hidden'), noCat: !document.querySelector('[class*=cat]'),
       headings: document.querySelectorAll('h1').length, titleCard: /izbirnik/i.test(document.body.innerText), headerKids: [...$('header').children].map(e => e.tagName.toLowerCase()).join(), tab: document.title };`);
@@ -325,6 +328,37 @@ try {
   check('duplicates: a tea may be renamed to its own name in another case or spacing', await ev(`return err() === '' && !$('#list li form') && texts().includes('SIPEK  CAJ') && texts().length === 5;`), await ev(`return err() + ' ' + texts().join('|');`));
   await ev(`del('SIPEK  CAJ'); del('Šipek čaj'); $('#add-input').value = '';`);
   check('duplicates: test teas removed again', await ev(`return texts().length === 3 && stored().length === 3;`));
+
+  // ---- the tick beside each tea decides whether it is on the wheel ----
+  const ticks = `[...document.querySelectorAll('#list li')].map(li => { const b = li.querySelector('input[type=checkbox]'); return (b ? (b.checked ? '[x] ' : '[ ] ') : '[?] ') + li.querySelector('.text').textContent + (li.classList.contains('off') ? ' (grey)' : ''); }).join(' | ')`;
+  const tick0 = await ev(`const li = row('hello world'), b = tickOf('hello world').getBoundingClientRect(), t = li.querySelector('.text').getBoundingClientRect();
+    return { ticks: ${ticks}, wheel: onWheelNow(), labels: [...document.querySelectorAll('#list li input[type=checkbox]')].map(b => b.getAttribute('aria-label')).join('|'), saved: savedTeas().some(t => 'off' in t),
+      left: b.right <= t.left, sameRow: b.top < t.bottom && b.bottom > t.top, size: [b.width, b.height], first: li.firstElementChild === tickOf('hello world') };`);
+  check('ticks: every tea has a tick, ticked by default, and all of them are on the wheel', tick0.ticks === '[x] <b>bold</b> | [x] yyyyyyyyyyyyyyyyyyyy | [x] hello world' && tick0.wheel === '<b>bold</b>|yyyyyyyyyyyyyyyyyyyy|hello world' && !tick0.saved, JSON.stringify(tick0));
+  check('ticks: the box sits before the name, big enough to tap, and says what it is for', tick0.left && tick0.sameRow && tick0.first && tick0.size.every(s => s >= 24) && tick0.labels === 'Na kolesu: <b>bold</b>|Na kolesu: yyyyyyyyyyyyyyyyyyyy|Na kolesu: hello world', JSON.stringify(tick0));
+
+  await clickAt(...await ev(`const r = tickOf('hello world').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2];`));
+  const tick1 = await ev(`return { ticks: ${ticks}, wheel: onWheelNow(), slices: document.querySelectorAll('#wheel-spin path').length, saved: JSON.stringify(savedTeas().map(t => [t.text, t.off])), focus: document.activeElement === tickOf('hello world'), listed: texts().join('|'), open: dialog.open };`);
+  check('ticks: clearing one takes that tea off the wheel but leaves it, greyed, in the list', tick1.ticks === '[x] <b>bold</b> | [x] yyyyyyyyyyyyyyyyyyyy | [ ] hello world (grey)' && tick1.wheel === '<b>bold</b>|yyyyyyyyyyyyyyyyyyyy' && tick1.slices === 2 && tick1.listed.endsWith('hello world') && tick1.open, JSON.stringify(tick1));
+  check('ticks: the choice is saved with the tea, and the focus stays on the box', tick1.saved === '[["<b>bold</b>",null],["yyyyyyyyyyyyyyyyyyyy",null],["hello world",true]]' && tick1.focus, JSON.stringify(tick1));
+  await load();
+  check('ticks: a cleared tick survives a reload', await ev(`return onWheelNow() === '<b>bold</b>|yyyyyyyyyyyyyyyyyyyy' && !tickOf('hello world').checked && tickOf('<b>bold</b>').checked && row('hello world').classList.contains('off');`), await ev(`return ${ticks};`));
+  await ev(`$('#edit-teas').click(); btn('hello world', 'Uredi').click();`);
+  const tickEdit = await ev(`const li = $('#list li form').closest('li'); return { box: !!li.querySelector('input[type=checkbox]') && !li.querySelector('input[type=checkbox]').checked, textInput: $('#list li form input').type, focus: document.activeElement === $('#list li form input') };`);
+  check('ticks: the row being renamed keeps its tick, and the name field is still what gets the focus', tickEdit.box && tickEdit.textInput === 'text' && tickEdit.focus, JSON.stringify(tickEdit));
+  await ev(`const i = $('#list li form input'); i.value = 'Hello World 2'; i.closest('form').requestSubmit();`);
+  check('ticks: renaming a tea leaves its tick as it was', await ev(`return !tickOf('Hello World 2').checked && onWheelNow() === '<b>bold</b>|yyyyyyyyyyyyyyyyyyyy' && savedTeas().find(t => t.text === 'Hello World 2').off === true;`), await ev(`return ${ticks};`));
+  await ev(`add('hello world 2');`);
+  check('ticks: a tea left off the wheel still counts when checking for duplicates', await ev(`return err() === 'Ta čaj je že na seznamu.' && texts().length === 3;`), await ev(`return err();`));
+  await ev(`$('#add-input').value = ''; btn('Hello World 2', 'Izbriši').click();`);
+  check('ticks: the row asking "Izbrišem?" keeps its tick too', await ev(`const li = row('Hello World 2'); return !!li.querySelector('.ask') && li.firstElementChild.type === 'checkbox' && !li.firstElementChild.checked;`));
+  await ev(`btn('Hello World 2', 'Ne').click(); tickOf('<b>bold</b>').click(); tickOf('yyyyyyyyyyyyyyyyyyyy').click();`);
+  const tickNone = await ev(`return { ticks: ${ticks}, blank: document.querySelectorAll('#wheel-spin circle.empty').length, texts: document.querySelectorAll('#wheel-spin text, #wheel-spin path').length, disabled: $('#spin-button').disabled, hint: !$('#hint').hidden && $('#hint').textContent, listed: texts().length, emptyNote: !$('#empty').hidden };`);
+  check('ticks: with every tick cleared the wheel is blank and cannot be spun, and the hint says how to fill it', tickNone.blank === 1 && tickNone.texts === 0 && tickNone.disabled && tickNone.hint === 'Kolo je prazno. Čaje dodaš ali vključiš v meniju ⋮ zgoraj desno.' && tickNone.listed === 3 && !tickNone.emptyNote, JSON.stringify(tickNone));
+  await ev(`tickOf('Hello World 2').click();`);
+  check('ticks: ticking one puts just that tea back, as the whole wheel', await ev(`return onWheelNow() === 'Hello World 2' && document.querySelectorAll('#wheel-spin circle:not(.empty)').length === 1 && !$('#spin-button').disabled && $('#hint').hidden && !('off' in savedTeas().find(t => t.text === 'Hello World 2'));`), await ev(`return ${ticks} + ' / ' + onWheelNow();`));
+  await ev(`tickOf('<b>bold</b>').click(); tickOf('yyyyyyyyyyyyyyyyyyyy').click(); btn('Hello World 2', 'Uredi').click(); const i = $('#list li form input'); i.value = 'hello world'; i.closest('form').requestSubmit();`);
+  check('ticks: all ticked again, the wheel is back to the full list in list order', await ev(`return ${ticks} === '[x] <b>bold</b> | [x] yyyyyyyyyyyyyyyyyyyy | [x] hello world' && onWheelNow() === texts().join('|') && !savedTeas().some(t => 'off' in t);`), await ev(`return ${ticks};`));
 
   check('editor: wheel behind the dialog already shows the teas', await ev(`return dialog.open && [...$('#wheel-spin').querySelectorAll('text')].map(t => t.textContent).join('|') === texts().join('|') && $('#hint').hidden;`));
   await ev(`btn('hello world', 'Uredi').click();`);
@@ -685,6 +719,43 @@ try {
   const upgradedState = await sv(`return ${dayState};`);
   check('next spin after that saves the new format with today', upgradedState.saved && upgradedState.saved.day === upgradedState.today && upgradedState.date === upgradedState.todayText && upgraded.tea.toUpperCase() === upgradedState.sign.slice('Čaj dneva: '.length), JSON.stringify(upgradedState));
 
+  // ---- spinning only ever lands on a ticked tea ----
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`['Zeleni', 'Črni', 'Meta', 'Kamilica', 'Šipek'].forEach(add); tickOf('Meta').click(); tickOf('Šipek').click();`);
+  check('ticks: the wheel holds the three ticked teas of five', await sv(`return labels().join('|') === 'Kamilica|Črni|Zeleni' && slices().length === 3;`), await sv(`return labels().join('|');`));
+  const tickedWins = new Set(); let tickTrouble = '';
+  for (let i = 0; i < 40; i++) {
+    const s = await fastSpin();
+    tickedWins.add(s.tea);
+    if (!landedOk(s) || ['Meta', 'Šipek'].includes(s.tea)) tickTrouble += JSON.stringify(s) + ' ';
+  }
+  check('ticks: 40 spins land only on ticked teas, and on all three of them', tickTrouble === '' && [...tickedWins].sort().join('|') === 'Kamilica|Zeleni|Črni', tickTrouble.slice(0, 300) + [...tickedWins]);
+  check('ticks: the history lists only ticked teas', await sv(`return JSON.parse(localStorage.getItem('webapp.history')).every(p => ['Kamilica', 'Zeleni', 'Črni'].includes(p.text));`));
+
+  // The current tea of the day is taken off the wheel: it stays the tea of the day, but cannot be spun again.
+  const tickPick = (await sv(`return state();`)).tea;
+  await sv(`tickOf(${JSON.stringify(tickPick)}).click();`);
+  const offPick = await sv(`return { sign: sign(), wheel: labels().join('|'), highlighted: spin.querySelectorAll('.winner, .winner-label').length, saved: !!localStorage.getItem('webapp.winner') };`);
+  check('ticks: unticking the tea of the day keeps the sign, drops its slice and highlight', offPick.sign === `Čaj dneva: ${tickPick.toUpperCase()}` && !offPick.wheel.split('|').includes(tickPick) && offPick.wheel.split('|').length === 2 && offPick.highlighted === 0 && offPick.saved, JSON.stringify(offPick));
+  const afterOff = [];
+  for (let i = 0; i < 6; i++) afterOff.push((await fastSpin()).tea);
+  check('ticks: later spins choose among the teas still ticked', !afterOff.includes(tickPick) && afterOff.every((t, i) => i === 0 || t !== afterOff[i - 1]) && new Set(afterOff).size === 2, afterOff.join(','));
+
+  // A tick cleared while the wheel is turning: the result is still a ticked tea, the one under the pointer.
+  await sv(`tickOf(${JSON.stringify(tickPick)}).click(); tickOf('Meta').click(); tickOf('Šipek').click();`);
+  let tickMid = '';
+  for (let i = 0; i < 20; i++) {
+    // The current pick is what the sign says; after re-ticking, the wheel has been redrawn around it.
+    const current = (await sv(`return sign();`)).slice('Čaj dneva: '.length);
+    const victim = ['Zeleni', 'Črni', 'Meta', 'Kamilica', 'Šipek'].filter(t => t.toUpperCase() !== current)[i % 4];
+    const s = await fastSpin(`tickOf('${victim}').click();`);
+    if (s.tea === victim || s.tea.toUpperCase() === current || s.sign !== `Čaj dneva: ${s.tea.toUpperCase()}` || !s.sliceIsWinner || s.off >= s.half) tickMid += `try ${i} current=${current} off=${victim}: ${JSON.stringify(s)} `;
+    await sv(`tickOf('${victim}').click();`);
+  }
+  check('ticks: clearing a tick mid-spin (20 tries) never lets that tea, or the current one, win', tickMid === '', tickMid.slice(0, 400));
+  check('ticks: all five ticked again', await sv(`return labels().length === 5 && !savedTeas().some(t => 'off' in t);`));
+
   // ---- history of picks: last ten, newest first, saved on the device ----
   const historyState = `(() => { const h = $('#history-dialog'); let saved = null; try { saved = JSON.parse(localStorage.getItem('webapp.history')); } catch {}
     return { open: h.open, rows: [...h.querySelectorAll('#history-list li')].map(li => li.querySelector('.text').textContent + ' @ ' + li.querySelector('.when').textContent), saved, empty: shown('#history-empty') }; })()`;
@@ -857,6 +928,11 @@ try {
   writeFileSync(join(scratch, 'phone-editor.png'), Buffer.from(shotE.result.data, 'base64'));
   await tap(...await sv(`return middle('#close-teas');`));
   check('phone: tapping "Zapri" closes the editor', await sv(`return !dialog.open;`));
+  await sv(`$('#edit-teas').click();`);
+  await tap(...await sv(`const r = tickOf('Meta').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2];`));
+  const phoneTick = await sv(`const b = tickOf('Meta').getBoundingClientRect(), li = row('Meta').getBoundingClientRect(); return { size: [b.width, b.height], checked: tickOf('Meta').checked, wheel: labels().join('|'), fits: [...row('Meta').children].every(c => c.getBoundingClientRect().right <= li.right + 0.5), oneLine: li.height < 70 };`);
+  check('phone: a tick is finger-sized, tapping it takes the tea off the wheel, and the row still fits', phoneTick.size.every(s => s >= 24) && !phoneTick.checked && !phoneTick.wheel.includes('Meta') && phoneTick.wheel.split('|').length === 4 && phoneTick.fits && phoneTick.oneLine, JSON.stringify(phoneTick));
+  await sv(`tickOf('Meta').click(); dialog.close();`);
   const box = await sv(`spinBtn.scrollIntoView({ block: 'center' }); const r = spinBtn.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2];`);
   for (const type of ['touchStart', 'touchEnd']) await send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchStart' ? [{ x: box[0], y: box[1] }] : [] });
   await sleep(300);
@@ -1024,6 +1100,18 @@ try {
   await sv(`del('Meta poprova');`);
   await uploaded();
   check('sharing: deleting a tea uploads it', teasOf(sharedNow()) === 'Črni|Zeleni', shared.body);
+  await sv(`tickOf('Črni').click();`);
+  await uploaded();
+  check('sharing: clearing a tick uploads it as part of the tea', JSON.stringify(sharedNow().teas.map(t => [t.text, t.off])) === '[["Črni",true],["Zeleni",null]]', shared.body);
+  const tickElsewhere = sharedNow();
+  delete tickElsewhere.teas[0].off;
+  tickElsewhere.teas[1].off = true;
+  shared.body = JSON.stringify(tickElsewhere);
+  await lookAgain();
+  check('sharing: ticks changed on another device arrive here: list and wheel follow', await sv(`return tickOf('Črni').checked && !tickOf('Zeleni').checked && labels().join('|') === 'Črni' && row('Zeleni').classList.contains('off');`), await sv(`return labels().join('|');`));
+  await sv(`tickOf('Zeleni').click();`);
+  await uploaded();
+  check('sharing: ticking it again uploads the tea without the flag', !sharedNow().teas.some(t => 'off' in t) && await sv(`return labels().join('|') === 'Črni|Zeleni';`), shared.body);
   const postsBeforeSpin = shared.posts.length;
   const sharedPick = await fastSpin();
   await uploaded();
