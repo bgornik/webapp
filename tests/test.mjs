@@ -865,6 +865,83 @@ try {
   const allSame = await fastSpin();
   check('only same-named teas left: spin still completes', allSame.sign === 'Čaj dneva: META' && !allSame.disabled, JSON.stringify(allSame));
 
+  // ---- never any of the last four picks ----
+  const historyTeas = `JSON.parse(localStorage.getItem('webapp.history') || '[]').map(p => p.text)`;
+  const six = ['Zeleni', 'Črni', 'Meta', 'Kamilica', 'Šipek', 'Lipa'];
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`${JSON.stringify(six)}.forEach(add);`);
+  let recentClash = '';
+  const sixWins = [];
+  for (let i = 0; i < 40; i++) {
+    const before = await sv(`return ${historyTeas};`);
+    const s = await fastSpin();
+    if (!landedOk(s) || before.slice(0, 4).includes(s.tea)) recentClash += `spin ${i}: ${s.tea} after ${before.slice(0, 4).join(',')}; `;
+    sixWins.push(s.tea);
+  }
+  check('recent: with six teas, 40 spins never land on any of the four before', recentClash === '', recentClash.slice(0, 400));
+  check('recent: and every tea still comes up; the choice between the two allowed is random', new Set(sixWins).size === 6 && new Set(sixWins.slice(4).map((t, i) => t + '>' + sixWins[i + 5])).size > 6, sixWins.join(','));
+  check('recent: the history the rule reads is the one shown in "Zgodovina izbranih čajev"', await sv(`$('#open-history').click(); const listed = [...document.querySelectorAll('#history-list .text')].map(e => e.textContent); $('#history-dialog').close(); return listed.join('|') === ${historyTeas}.join('|') && listed.length === 10;`));
+
+  // Fewer teas on the wheel than that: the oldest recent picks are let back in, so there is always a choice.
+  const fallbackRuns = {};
+  for (const [count, gap] of [[5, 4], [4, 3], [3, 2], [2, 1]]) {
+    await ev(`localStorage.clear();`);
+    await load();
+    await sv(`${JSON.stringify(six.slice(0, count))}.forEach(add);`);
+    let bad = '';
+    const wins = [];
+    for (let i = 0; i < 4 * count; i++) {
+      const before = await sv(`return ${historyTeas};`);
+      const s = await fastSpin();
+      if (!landedOk(s) || before.slice(0, gap).includes(s.tea)) bad += `${s.tea} after ${before.slice(0, gap).join(',')}; `;
+      wins.push(s.tea);
+    }
+    fallbackRuns[count] = { bad, distinct: new Set(wins).size, cycle: wins.slice(count).every((t, i) => t === wins[i]) };
+  }
+  check('recent: with 5, 4, 3 or 2 teas a spin avoids as many recent picks as it can (4, 3, 2, 1), cycling through them all', Object.entries(fallbackRuns).every(([count, r]) => r.bad === '' && r.distinct === +count && r.cycle), JSON.stringify(fallbackRuns));
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`add('Samo en');`);
+  const loneRecent = [(await fastSpin()).tea, (await fastSpin()).tea, (await fastSpin()).tea];
+  check('recent: a lone tea on the wheel still wins every time', loneRecent.every(t => t === 'Samo en'), loneRecent.join(','));
+
+  // Names are matched the way duplicates are: case and spaces do not matter, and only the last four count.
+  const variants = [{ text: 'ZELENI', day: '2026-10-19' }, { text: 'č r n i', day: '2026-10-18' }, { text: 'meta', day: '2026-10-17' }, { text: 'Kami lica', day: '2026-10-16' }, { text: 'Šipek', day: '2026-10-15' }];
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`${JSON.stringify(six)}.forEach(add);`);
+  const variantWins = new Set();
+  for (let i = 0; i < 16; i++) {
+    await sv(`localStorage.setItem('webapp.history', ${JSON.stringify(JSON.stringify(variants))}); localStorage.removeItem('webapp.winner');`);
+    await load();
+    variantWins.add((await fastSpin()).tea);
+  }
+  check('recent: history entries match teas regardless of case and spacing; the fifth-newest no longer blocks', [...variantWins].sort().join('|') === 'Lipa|Šipek', [...variantWins].join(','));
+
+  // The history was cleared, but there is a tea of the day: it is still not picked again.
+  await sv(`localStorage.setItem('webapp.history', '[]'); localStorage.setItem('webapp.winner', JSON.stringify({ id: JSON.parse(localStorage.getItem('webapp.strings')).find(t => t.text === 'Meta').id, day: '2026-10-19' }));`);
+  await load();
+  const afterClearWins = new Set();
+  for (let i = 0; i < 10; i++) {
+    await sv(`localStorage.setItem('webapp.history', '[]'); localStorage.setItem('webapp.winner', JSON.stringify({ id: JSON.parse(localStorage.getItem('webapp.strings')).find(t => t.text === 'Meta').id, day: '2026-10-19' }));`);
+    await load();
+    afterClearWins.add((await fastSpin()).tea);
+  }
+  check('recent: with the history cleared, the current tea of the day is still avoided', !afterClearWins.has('Meta') && afterClearWins.size >= 3, [...afterClearWins].join(','));
+
+  // Unticked teas are off the wheel and do not use up the choice.
+  await ev(`localStorage.clear();`);
+  await load();
+  await sv(`${JSON.stringify(six)}.forEach(add); tickOf('Lipa').click(); tickOf('Šipek').click();`);
+  let tickRecent = '';
+  for (let i = 0; i < 12; i++) {
+    const before = await sv(`return ${historyTeas};`);
+    const s = await fastSpin();
+    if (['Lipa', 'Šipek'].includes(s.tea) || before.slice(0, 3).includes(s.tea)) tickRecent += `${s.tea} after ${before.slice(0, 3).join(',')}; `;
+  }
+  check('recent: with four teas ticked of six, spins cycle through the ticked four only', tickRecent === '', tickRecent);
+
   // Another tab changing the saved pick is reflected here.
   await ev(`localStorage.clear();`);
   await load();

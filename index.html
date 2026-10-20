@@ -315,6 +315,7 @@
     const WINNER_KEY = 'webapp.winner'; // the current tea of the day and the day it was picked
     const HISTORY_KEY = 'webapp.history'; // the last few picks, newest first, as [{ text, day, time }]
     const HISTORY_LENGTH = 10;
+    const RECENT_PICKS = 4; // a spin never lands on any of this many most recent picks
 
     // Shared state: the address of the Apps Script web app that keeps it in one file in Google Drive
     // (apps-script/Code.gs; README.md has the setup). Emptying it keeps everything on the device again.
@@ -377,7 +378,7 @@
     let winnerDay = null; // the day it was picked, as YYYY-MM-DD; this is the date the sign shows
     loadWinner();
     let picks = loadHistory();
-    let avoidName = null; // while spinning: the current tea of the day, which must not win again
+    let recentKeys = []; // while spinning: the most recent picks, newest first, which must not win again
     let spinning = false;
     let wheelAngle = 0; // degrees clockwise, where the wheel rests when nothing is animating it
     let wheelAnimation = null;
@@ -531,7 +532,7 @@
       return date.getMonth() === match[2] - 1 && date.getDate() === +match[3] ? date : null;
     }
 
-    // How a tea reads on the sign. Two teas that read the same there count as the same tea.
+    // How a tea reads on the sign.
     function signName(item) {
       return item.text.toLocaleUpperCase('sl');
     }
@@ -763,8 +764,16 @@
       setWheelAngle(wheelAngle + 360 * progress);
     }
 
-    function canWin(item) {
-      return signName(item) !== avoidName;
+    // The teas a spin may land on: none of the last RECENT_PICKS picks. Picks are matched by name, the
+    // way duplicates are, so a tea renamed since it was picked counts as new. When the wheel holds too
+    // few teas for that, the oldest of those picks are let back in one at a time; a lone tea always may.
+    function allowedOn(teas) {
+      for (let depth = recentKeys.length; depth > 0; depth--) {
+        const avoid = new Set(recentKeys.slice(0, depth));
+        const allowed = teas.filter(tea => !avoid.has(teaKey(tea.text)));
+        if (allowed.length) return allowed;
+      }
+      return teas;
     }
 
     // The rotation, at or just past the current one, that puts a spot of the given slice under the pointer.
@@ -786,15 +795,17 @@
       const teas = wheelTeas();
       if (spinning || teas.length === 0) return;
       stopIdle();
+      // The current tea of the day is normally the newest history entry; it is added if the history
+      // was cleared after it was picked.
       const current = items.find(item => item.id === winnerId);
-      avoidName = current ? signName(current) : null;
+      recentKeys = picks.slice(0, RECENT_PICKS).map(pick => teaKey(pick.text));
+      if (current && recentKeys[0] !== teaKey(current.text)) recentKeys = [teaKey(current.text), ...recentKeys].slice(0, RECENT_PICKS);
       spinning = true;
       winnerId = null; // drops the highlight for the spin; the saved pick is only replaced on landing
       renderWheel();
 
-      // Pick any tea but the current one, then a spot inside its slice (away from the edges).
-      const others = teas.filter(canWin);
-      const pool = others.length ? others : teas; // a lone tea can only win again
+      // Pick any tea not picked recently, then a spot inside its slice (away from the edges).
+      const pool = allowedOn(teas);
       const index = teas.indexOf(pool[Math.floor(Math.random() * pool.length)]);
       rotateTo(angleToSlice(index, 0.15 + Math.random() * 0.7) + SPIN_TURNS * 360, SPIN_MS);
     }
@@ -808,10 +819,11 @@
       const teas = wheelTeas();
       const count = teas.length;
       const index = Math.min(Math.floor(((360 - wheelAngle) % 360) / (360 / count)), count - 1);
-      // If such a change left the current tea under the pointer, roll on to the next one that may win.
-      if (count && !canWin(teas[index]) && teas.some(canWin)) {
+      // If such a change left a recent pick under the pointer, roll on to the next tea that may win.
+      const allowed = allowedOn(teas);
+      if (count && !allowed.includes(teas[index])) {
         let next = index;
-        do next = (next - 1 + count) % count; while (!canWin(teas[next]));
+        do next = (next - 1 + count) % count; while (!allowed.includes(teas[next]));
         rotateTo(angleToSlice(next, 0.5), NUDGE_MS);
         return;
       }
