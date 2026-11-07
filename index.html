@@ -315,7 +315,7 @@
     const WINNER_KEY = 'webapp.winner'; // the current tea of the day and the day it was picked
     const HISTORY_KEY = 'webapp.history'; // the last few picks, newest first, as [{ text, day, time }]
     const HISTORY_LENGTH = 10;
-    const RECENT_PICKS = 4; // a spin never lands on any of this many most recent picks
+    const RECENT_PICKS = 10; // a spin never lands on any of this many most recent picks
 
     // Shared state: the address of the Apps Script web app that keeps it in one file in Google Drive
     // (apps-script/Code.gs; README.md has the setup). Emptying it keeps everything on the device again.
